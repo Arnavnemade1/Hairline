@@ -1,0 +1,11 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.hairline-cache/
+tests/fixtures/repos/
+# Fixtures are authored as .ts only; any emitted sibling is a stale artifact.
+tests/**/*.js
+tests/**/*.js.map
+tests/**/*.d.ts
+.DS_Store
+.env

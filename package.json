@@ -1,0 +1,43 @@
+{
+  "name": "hairline",
+  "version": "0.1.0",
+  "description": "Semantic integration engine: detects conflicts between concurrent branches that Git merges cleanly.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22.6"
+  },
+  "bin": {
+    "hairline": "./bin/hairline.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "bin",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test --experimental-strip-types \"tests/**/*.test.ts\"",
+    "test:unit": "node --test --experimental-strip-types \"tests/unit/**/*.test.ts\"",
+    "fixtures": "node --experimental-strip-types scripts/build-fixtures.ts",
+    "evaluate": "node --experimental-strip-types scripts/evaluate.ts",
+    "demo": "node --experimental-strip-types scripts/demo.ts",
+    "hairline": "node --experimental-strip-types src/cli/main.ts"
+  },
+  "dependencies": {
+    "typescript": "5.9.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0"
+  }
+}
