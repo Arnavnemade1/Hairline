@@ -31,6 +31,7 @@
     "test:unit": "node --test --experimental-strip-types \"tests/unit/**/*.test.ts\"",
     "evaluate": "node --experimental-strip-types scripts/evaluate.ts",
     "demo": "node --experimental-strip-types scripts/demo.ts",
+    "site": "node --experimental-strip-types scripts/serve-site.ts",
     "hairline": "node --experimental-strip-types src/cli/main.ts",
     "validate": "node --experimental-strip-types scripts/validate-real-world.ts"
   },

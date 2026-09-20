@@ -283,6 +283,20 @@ and, opt-in, one `node_modules`.
 
 ---
 
+## The landing page
+
+A dependency-free static site lives in [`site/`](./site) — one HTML file, one
+stylesheet, one script, no build step. It explains the problem, shows a real
+finding, and publishes the limits next to the results.
+
+```bash
+npm run site   # http://localhost:4173
+```
+
+Any static host serves the directory as it is.
+
+---
+
 ## Documentation
 
 | | |
