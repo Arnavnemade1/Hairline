@@ -1,7 +1,7 @@
 import { parseSymbolId, type ModulePath, type SymbolId } from '../model/ids.ts';
 import type { CallableShape, Contract, LiteralSet, ObjectShape } from '../model/contracts.ts';
 import type { SymbolRecord } from '../model/symbols.ts';
-import type { ImportEdge, LiteralObservation, Reference } from '../model/references.ts';
+import type { ExportedName, ImportEdge, LiteralObservation, Reference } from '../model/references.ts';
 import type { SemanticIndex } from '../model/snapshot.ts';
 import type {
   BranchChangeSet,
@@ -25,6 +25,22 @@ const FIELD_SEPARATOR = String.fromCharCode(1);
  */
 const NULLISH = new Set(['null', 'undefined', 'void']);
 
+/**
+ * Whether a rendered return type is something a caller must await.
+ *
+ * Deliberately textual rather than type-directed: the differ compares two
+ * *renderings* produced by two independent programs, and there is no shared
+ * checker in which to ask the question properly. The prefixes below are what
+ * `typeToString` emits for the awaitable types that actually occur in return
+ * position.
+ */
+const AWAITABLE_PREFIXES = ['Promise<', 'PromiseLike<', 'Awaited<'];
+
+function isAwaitable(text: string): boolean {
+  const trimmed = text.trim();
+  return AWAITABLE_PREFIXES.some((prefix) => trimmed.startsWith(prefix));
+}
+
 function isNullableText(text: string): boolean {
   return text
     .split('|')
@@ -33,7 +49,10 @@ function isNullableText(text: string): boolean {
 }
 
 function diffLiteralSets(before: LiteralSet | undefined, after: LiteralSet | undefined): ContractDelta[] {
-  if (!before && !after) return [];
+  // One side missing means *unknown*, never "admits nothing". Treating an
+  // absent set as empty would report every value as removed the moment one
+  // side's contract was not fully extracted.
+  if (!before || !after) return [];
   const deltas: ContractDelta[] = [];
   const beforeValues = new Set(before?.values ?? []);
   const afterValues = new Set(after?.values ?? []);
@@ -134,6 +153,16 @@ function diffCallables(
       before: first.returnTypeText,
       after: second.returnTypeText,
     });
+    const wasAsync = isAwaitable(first.returnTypeText);
+    const isNowAsync = isAwaitable(second.returnTypeText);
+    if (wasAsync !== isNowAsync) {
+      deltas.push({
+        kind: 'async-boundary-changed',
+        nowAsync: isNowAsync,
+        before: first.returnTypeText,
+        after: second.returnTypeText,
+      });
+    }
     const wasNullable = isNullableText(first.returnTypeText);
     const isNowNullable = isNullableText(second.returnTypeText);
     if (wasNullable !== isNowNullable) {
@@ -172,6 +201,24 @@ function diffObjects(before: ObjectShape | undefined, after: ObjectShape | undef
       }
       if (member.optional !== next.optional) {
         deltas.push({ kind: 'member-optionality-changed', name, nowRequired: !next.optional });
+      }
+      // Modifiers are part of the contract even when the type is untouched:
+      // narrowing visibility hides a member from every external reader,
+      // `readonly` breaks writers, and moving between instance and static
+      // changes how every use site must spell the access.
+      if (member.visibility !== next.visibility) {
+        deltas.push({
+          kind: 'member-visibility-changed',
+          name,
+          before: member.visibility,
+          after: next.visibility,
+        });
+      }
+      if (member.readonly !== next.readonly) {
+        deltas.push({ kind: 'member-readonly-changed', name, nowReadonly: next.readonly });
+      }
+      if (member.static !== next.static) {
+        deltas.push({ kind: 'member-static-changed', name, nowStatic: next.static });
       }
     }
   }
@@ -230,6 +277,20 @@ function diffObjects(before: ObjectShape | undefined, after: ObjectShape | undef
 export function contractDeltas(before: SymbolRecord, after: SymbolRecord): ContractDelta[] {
   const deltas: ContractDelta[] = [];
 
+  /**
+   * Whether the two contracts can be compared facet by facet at all.
+   *
+   * A contract may be recorded by identity alone — because its file was
+   * outside the extraction scope, or because the extraction budget ran out.
+   * Comparing a known contract against an unknown one would turn every facet
+   * of the known side into a spurious delta, which is the single most
+   * dangerous failure mode in the change model: it manufactures conflicts out
+   * of an indexing shortcut. Structural facts that do not come from the
+   * checker — export status, declaration kind, module, body fingerprint — are
+   * still compared, because they are recorded either way.
+   */
+  const comparable = before.contract.typeResolved && after.contract.typeResolved;
+
   if (before.kind !== after.kind) {
     deltas.push({ kind: 'kind-changed', before: before.kind, after: after.kind });
   }
@@ -247,18 +308,15 @@ export function contractDeltas(before: SymbolRecord, after: SymbolRecord): Contr
   const beforeContract: Contract = before.contract;
   const afterContract: Contract = after.contract;
 
-  deltas.push(...diffCallables(beforeContract.callable, afterContract.callable));
-  deltas.push(...diffObjects(beforeContract.object, afterContract.object));
-  deltas.push(...diffLiteralSets(beforeContract.literals, afterContract.literals));
+  if (comparable) {
+    deltas.push(...diffCallables(beforeContract.callable, afterContract.callable));
+    deltas.push(...diffObjects(beforeContract.object, afterContract.object));
+    deltas.push(...diffLiteralSets(beforeContract.literals, afterContract.literals));
+  }
 
   // Only reported when nothing more specific explains the difference; an
   // unqualified "the type changed" on top of five precise deltas is noise.
-  if (
-    beforeContract.typeResolved &&
-    afterContract.typeResolved &&
-    beforeContract.typeText !== afterContract.typeText &&
-    deltas.length === 0
-  ) {
+  if (comparable && beforeContract.typeText !== afterContract.typeText && deltas.length === 0) {
     deltas.push({
       kind: 'type-text-changed',
       before: beforeContract.typeText ?? '<unknown>',
@@ -276,7 +334,7 @@ export function contractDeltas(before: SymbolRecord, after: SymbolRecord): Contr
     }
   }
 
-  if (beforeContract.initializerText !== afterContract.initializerText) {
+  if (comparable && beforeContract.initializerText !== afterContract.initializerText) {
     deltas.push({
       kind: 'initializer-changed',
       before: beforeContract.initializerText,
@@ -307,11 +365,22 @@ export function contractDeltas(before: SymbolRecord, after: SymbolRecord): Contr
  * reference is who makes it, what it names, and how.
  */
 function referenceKey(reference: Reference): string {
-  return `${reference.from}${FIELD_SEPARATOR}${reference.to ?? reference.name}${FIELD_SEPARATOR}${reference.kind}${FIELD_SEPARATOR}${reference.argumentCount ?? ''}`;
+  return `${reference.from}${FIELD_SEPARATOR}${reference.to ?? reference.name}${FIELD_SEPARATOR}${reference.kind}${FIELD_SEPARATOR}${reference.argumentCount ?? ''}${FIELD_SEPARATOR}${reference.awaited ?? ''}`;
 }
 
 function literalKey(observation: LiteralObservation): string {
   return `${observation.enclosing}${FIELD_SEPARATOR}${observation.value}${FIELD_SEPARATOR}${observation.context}${FIELD_SEPARATOR}${observation.against ?? observation.againstName ?? ''}`;
+}
+
+/**
+ * Keyed by module and exported name only.
+ *
+ * The target is excluded deliberately: re-pointing `export { load }` at a
+ * different implementation keeps the surface intact from an importer's point
+ * of view, and is a `same-symbol` question rather than a surface one.
+ */
+function exportKey(entry: ExportedName): string {
+  return `${entry.module}${FIELD_SEPARATOR}${entry.name}${FIELD_SEPARATOR}${entry.typeOnly}`;
 }
 
 function importKey(edge: ImportEdge): string {
@@ -444,6 +513,7 @@ export function diffIndexes(
   const references = diffCollections(baseIndex.references, headIndex.references, referenceKey);
   const literals = diffCollections(baseIndex.literals, headIndex.literals, literalKey);
   const imports = diffCollections(baseIndex.imports, headIndex.imports, importKey);
+  const exportSurface = diffCollections(baseIndex.exports, headIndex.exports, exportKey);
 
   const changedFiles = new Set<ModulePath>();
   for (const change of symbolChanges.values()) {
@@ -452,6 +522,9 @@ export function diffIndexes(
   }
   for (const reference of [...references.added, ...references.removed]) {
     changedFiles.add(reference.range.module);
+  }
+  for (const entry of [...exportSurface.added, ...exportSurface.removed]) {
+    changedFiles.add(entry.module);
   }
 
   return {
@@ -467,6 +540,8 @@ export function diffIndexes(
     removedLiterals: literals.removed,
     addedImports: imports.added,
     removedImports: imports.removed,
+    addedExports: exportSurface.added,
+    removedExports: exportSurface.removed,
     changedFiles: [...changedFiles].sort(),
     diagnostics: [...baseIndex.diagnostics, ...headIndex.diagnostics],
   };

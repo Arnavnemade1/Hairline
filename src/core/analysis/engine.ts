@@ -8,6 +8,7 @@ import { diffIndexes } from '../changes/differ.ts';
 import { BranchView, type Analyzer, type PairContext } from './context.ts';
 import { removedDefinitionAnalyzer, signatureAnalyzer, memberAnalyzer } from './analyzers/definition-use.ts';
 import { literalSetAnalyzer } from './analyzers/literal-set.ts';
+import { exportSurfaceAnalyzer } from './analyzers/export-surface.ts';
 import { sameSymbolAnalyzer } from './analyzers/same-symbol.ts';
 import { behavioralRiskAnalyzer } from './analyzers/behavioral.ts';
 
@@ -22,6 +23,7 @@ const FIELD_SEPARATOR = String.fromCharCode(1);
 /** Registered in the order their findings should be preferred when they overlap. */
 export const DEFAULT_ANALYZERS: readonly Analyzer[] = [
   removedDefinitionAnalyzer,
+  exportSurfaceAnalyzer,
   literalSetAnalyzer,
   signatureAnalyzer,
   memberAnalyzer,
@@ -116,8 +118,26 @@ function summarisePair(left: BranchView, right: BranchView): PairSummary {
     right.freshLiterals().some((o) => leftValues.has(o.value)) ||
     left.freshLiterals().some((o) => rightValues.has(o.value));
 
+  // A narrowed export surface meeting a new import is an interaction even when
+  // no symbol, file or reference is shared — the barrel and the importer are
+  // different files and different declarations.
+  const removedExportNames = new Set(
+    [...left.changes.removedExports, ...right.changes.removedExports].map(
+      (e) => `${e.module}::${e.name}`,
+    ),
+  );
+  const exportOverlap = [...left.changes.addedImports, ...right.changes.addedImports].some(
+    (edge) =>
+      edge.to !== undefined &&
+      edge.names.some((name) => removedExportNames.has(`${edge.to}::${name}`)),
+  );
+
   const analysed =
-    shared.length > 0 || sharedModules.length > 0 || crossReferences > 0 || literalOverlap;
+    shared.length > 0 ||
+    sharedModules.length > 0 ||
+    crossReferences > 0 ||
+    literalOverlap ||
+    exportOverlap;
 
   return {
     branches: [left.label, right.label],
@@ -130,10 +150,11 @@ function summarisePair(left: BranchView, right: BranchView): PairSummary {
           sharedModules.length > 0 ? `${sharedModules.length} file(s) changed by both` : '',
           crossReferences > 0 ? `${crossReferences} cross-branch reference(s)` : '',
           literalOverlap ? 'overlapping literal values' : '',
+          exportOverlap ? 'a removed export meets a new import' : '',
         ]
           .filter(Boolean)
           .join('; ')
-      : 'no changed symbol, file, reference or value is shared between these branches',
+      : 'no changed symbol, file, reference, value or export is shared between these branches',
   };
 }
 

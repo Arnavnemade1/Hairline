@@ -3,7 +3,7 @@ import type { AnalysisDiagnostic } from '../core/model/diagnostics.ts';
 import { formatRange } from '../core/model/source.ts';
 import { describeSymbolId } from '../core/model/ids.ts';
 import type { RunResult } from '../run.ts';
-import { style, wrapText } from './style.ts';
+import { sanitize, style, wrapText } from './style.ts';
 
 const WIDTH = 88;
 
@@ -33,27 +33,27 @@ function renderFinding(finding: Finding, ordinal: number, total: number): string
 
   out.push('');
   out.push(
-    `${style.dim(`[${ordinal}/${total}]`)} ${badge} ${style.bold(finding.title)}`,
+    `${style.dim(`[${ordinal}/${total}]`)} ${badge} ${style.bold(sanitize(finding.title))}`,
   );
   out.push(
     `        ${style.dim(finding.category)}  ${confidence}  ${style.dim(`id ${finding.id}`)}`,
   );
   out.push('');
 
-  for (const line of wrapText(finding.description, WIDTH - 8, '')) {
+  for (const line of wrapText(sanitize(finding.description), WIDTH - 8, '')) {
     out.push(`        ${line}`);
   }
 
   out.push('');
   out.push(`        ${style.bold('Evidence')}`);
   for (const item of finding.evidence) {
-    const where = item.range ? style.dim(`  ${formatRange(item.range)}`) : '';
-    out.push(`          ${style.cyan(item.branch)}  ${item.summary}${where}`);
+    const where = item.range ? style.dim(`  ${sanitize(formatRange(item.range))}`) : '';
+    out.push(`          ${style.cyan(sanitize(item.branch))}  ${sanitize(item.summary)}${where}`);
     if (item.before !== undefined && item.after !== undefined) {
-      out.push(`            ${style.red(`- ${item.before}`)}`);
-      out.push(`            ${style.green(`+ ${item.after}`)}`);
+      out.push(`            ${style.red(`- ${sanitize(item.before)}`)}`);
+      out.push(`            ${style.green(`+ ${sanitize(item.after)}`)}`);
     } else if (item.before !== undefined) {
-      out.push(`            ${style.red(`was ${item.before}`)}`);
+      out.push(`            ${style.red(`was ${sanitize(item.before)}`)}`);
     }
   }
 
@@ -65,14 +65,14 @@ function renderFinding(finding: Finding, ordinal: number, total: number): string
 
   out.push('');
   out.push(`        ${style.bold('Suggested check')}`);
-  for (const line of wrapText(finding.verification, WIDTH - 10, '')) {
+  for (const line of wrapText(sanitize(finding.verification), WIDTH - 10, '')) {
     out.push(`          ${line}`);
   }
 
   if (finding.symbols.length > 0) {
     out.push('');
     out.push(
-      `        ${style.dim('symbols:')} ${finding.symbols.map((s) => describeSymbolId(s)).join(', ')}`,
+      `        ${style.dim('symbols:')} ${sanitize(finding.symbols.map((s) => describeSymbolId(s)).join(', '))}`,
     );
   }
 
@@ -109,9 +109,9 @@ function renderDiagnostics(diagnostics: readonly AnalysisDiagnostic[]): string[]
   out.push(heading('Analysis completeness'));
   for (const { diagnostic, count } of ordered.slice(0, 10)) {
     const marker = diagnostic.severity === 'error' ? style.red('!') : style.yellow('?');
-    const where = diagnostic.module ? style.dim(` (${diagnostic.module})`) : '';
+    const where = diagnostic.module ? style.dim(` (${sanitize(diagnostic.module)})`) : '';
     const repeats = count > 1 ? style.dim(` [x${count}]`) : '';
-    out.push(`  ${marker} ${diagnostic.message}${where}${repeats}`);
+    out.push(`  ${marker} ${sanitize(diagnostic.message)}${where}${repeats}`);
   }
   const hidden = ordered.length - 10;
   if (hidden > 0) out.push(style.dim(`  ... and ${hidden} more distinct issue(s)`));

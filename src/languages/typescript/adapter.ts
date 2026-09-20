@@ -33,7 +33,7 @@ export class TypeScriptAdapter implements LanguageAdapter {
         ? { nodeModulesRoot: options.nodeModulesRoot }
         : {}),
     });
-    const result = extract(snapshotProgram);
+    const result = extract(snapshotProgram, options.contractScope, options.contractBudgetMs);
 
     const diagnostics: AnalysisDiagnostic[] = [
       ...snapshotProgram.diagnostics,
@@ -63,6 +63,7 @@ export class TypeScriptAdapter implements LanguageAdapter {
       symbols: result.symbols,
       references: result.references,
       imports: result.imports,
+      exports: result.exports,
       literals: result.literals,
       diagnostics,
       coverage,

@@ -112,7 +112,9 @@ export async function buildSnapshot(
     }
     const language = policy.extensions[extensionOf(entry.path)];
     if (!language) continue;
-    if (entry.size > policy.maxFileBytes) {
+    // NaN means the size was unavailable (partial clone); the cap is then
+    // applied to the bytes actually read, further down.
+    if (Number.isFinite(entry.size) && entry.size > policy.maxFileBytes) {
       diagnostics.push({
         code: 'file-skipped',
         severity: 'warning',
@@ -147,6 +149,16 @@ export async function buildSnapshot(
         code: 'file-skipped',
         severity: 'warning',
         message: 'Blob could not be read from the object database',
+        module: candidate.path,
+        revision: oid,
+      });
+      continue;
+    }
+    if (buffer.length > policy.maxFileBytes) {
+      diagnostics.push({
+        code: 'file-skipped',
+        severity: 'warning',
+        message: `File exceeds ${policy.maxFileBytes} byte limit (${buffer.length} bytes); not indexed`,
         module: candidate.path,
         revision: oid,
       });
@@ -231,7 +243,7 @@ export async function buildSnapshotFromTree(
       isSafeRepoPath(e.path) &&
       !policy.excludedDirectories.some((d) => e.path.startsWith(d) || e.path.includes(`/${d}`)) &&
       policy.extensions[extensionOf(e.path)] !== undefined &&
-      e.size <= policy.maxFileBytes,
+      !(Number.isFinite(e.size) && e.size > policy.maxFileBytes),
   );
   const blobs = await repo.readBlobs(candidates.map((c) => c.oid));
   const contents = new Map<ModulePath, string>();

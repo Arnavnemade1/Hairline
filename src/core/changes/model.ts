@@ -1,6 +1,6 @@
 import type { ModulePath, SymbolId } from '../model/ids.ts';
 import type { SymbolRecord } from '../model/symbols.ts';
-import type { ImportEdge, LiteralObservation, Reference } from '../model/references.ts';
+import type { ExportedName, ImportEdge, LiteralObservation, Reference } from '../model/references.ts';
 import type { SemanticIndex } from '../model/snapshot.ts';
 import type { AnalysisDiagnostic } from '../model/diagnostics.ts';
 
@@ -51,6 +51,21 @@ export type ContractDelta =
     }
   | { readonly kind: 'required-arity-changed'; readonly before: number; readonly after: number }
   | { readonly kind: 'return-type-changed'; readonly before: string; readonly after: string }
+  | {
+      /**
+       * The result crossed the synchronous/asynchronous boundary.
+       *
+       * Modelled separately from `return-type-changed` because the failure is
+       * distinct and decidable: a caller that does not `await` now holds a
+       * Promise where it expected a value, and one that does `await` a value
+       * that is no longer a Promise silently gets the value. Neither is a
+       * variation in a type — it is a change in how the result must be used.
+       */
+      readonly kind: 'async-boundary-changed';
+      readonly nowAsync: boolean;
+      readonly before: string;
+      readonly after: string;
+    }
   | { readonly kind: 'overload-count-changed'; readonly before: number; readonly after: number }
   | { readonly kind: 'member-added'; readonly name: string; readonly typeText: string; readonly optional: boolean }
   | { readonly kind: 'member-removed'; readonly name: string; readonly typeText: string }
@@ -65,6 +80,14 @@ export type ContractDelta =
       readonly name: string;
       readonly nowRequired: boolean;
     }
+  | {
+      readonly kind: 'member-visibility-changed';
+      readonly name: string;
+      readonly before: 'public' | 'protected' | 'private';
+      readonly after: 'public' | 'protected' | 'private';
+    }
+  | { readonly kind: 'member-readonly-changed'; readonly name: string; readonly nowReadonly: boolean }
+  | { readonly kind: 'member-static-changed'; readonly name: string; readonly nowStatic: boolean }
   | { readonly kind: 'member-renamed'; readonly before: string; readonly after: string; readonly typeText: string }
   | { readonly kind: 'literal-removed'; readonly value: string }
   | { readonly kind: 'literal-added'; readonly value: string }
@@ -120,6 +143,16 @@ export interface BranchChangeSet {
   readonly removedLiterals: readonly LiteralObservation[];
   readonly addedImports: readonly ImportEdge[];
   readonly removedImports: readonly ImportEdge[];
+  /** Names a module newly makes available. */
+  readonly addedExports: readonly ExportedName[];
+  /**
+   * Names a module stopped making available.
+   *
+   * Not the same as a deleted symbol: a barrel can narrow its surface while
+   * every declaration behind it is untouched, which is invisible to any
+   * symbol-level comparison.
+   */
+  readonly removedExports: readonly ExportedName[];
   readonly changedFiles: readonly ModulePath[];
   readonly diagnostics: readonly AnalysisDiagnostic[];
 }
@@ -171,12 +204,22 @@ export function deltaImpact(delta: ContractDelta): DeltaImpact {
       return { ...NONE, callers: true, behavioralOnly: true };
     case 'return-type-changed':
     case 'nullability-changed':
+    case 'async-boundary-changed':
       return { ...NONE, callers: true, readers: true };
     case 'member-removed':
     case 'member-renamed':
     case 'member-type-changed':
     case 'member-optionality-changed':
+    case 'member-visibility-changed':
       return { ...NONE, readers: true, implementers: true };
+    case 'member-readonly-changed':
+      // Only writers break, but a write is a reference like any other and the
+      // reference kind is what the analyzer filters on.
+      return { ...NONE, readers: true, implementers: true };
+    case 'member-static-changed':
+      // Moving between instance and static changes how every use site must
+      // spell the access, so it reaches readers and callers alike.
+      return { ...NONE, readers: true, implementers: true, callers: true };
     case 'member-added':
       return { ...NONE, implementers: true };
     case 'literal-removed':
@@ -221,6 +264,10 @@ export function describeDelta(delta: ContractDelta): string {
       return `required argument count ${delta.before} -> ${delta.after}`;
     case 'return-type-changed':
       return `return type ${delta.before} -> ${delta.after}`;
+    case 'async-boundary-changed':
+      return delta.nowAsync
+        ? `became asynchronous: ${delta.before} -> ${delta.after}`
+        : `no longer asynchronous: ${delta.before} -> ${delta.after}`;
     case 'overload-count-changed':
       return `overload count ${delta.before} -> ${delta.after}`;
     case 'member-added':
@@ -231,6 +278,12 @@ export function describeDelta(delta: ContractDelta): string {
       return `member \`${delta.name}\`: ${delta.before} -> ${delta.after}`;
     case 'member-optionality-changed':
       return `member \`${delta.name}\` became ${delta.nowRequired ? 'required' : 'optional'}`;
+    case 'member-visibility-changed':
+      return `member \`${delta.name}\` visibility ${delta.before} -> ${delta.after}`;
+    case 'member-readonly-changed':
+      return `member \`${delta.name}\` became ${delta.nowReadonly ? 'readonly' : 'writable'}`;
+    case 'member-static-changed':
+      return `member \`${delta.name}\` became ${delta.nowStatic ? 'static' : 'an instance member'}`;
     case 'member-renamed':
       return `member \`${delta.before}\` renamed to \`${delta.after}\``;
     case 'literal-removed':

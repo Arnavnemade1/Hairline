@@ -1,6 +1,6 @@
 import type { LanguageId, ModulePath, SymbolId } from './ids.ts';
 import type { SymbolRecord } from './symbols.ts';
-import type { ImportEdge, LiteralObservation, Reference } from './references.ts';
+import type { ExportedName, ImportEdge, LiteralObservation, Reference } from './references.ts';
 import type { AnalysisDiagnostic, Coverage } from './diagnostics.ts';
 
 /** A file as it exists at one revision. */
@@ -41,6 +41,8 @@ export interface SemanticIndex {
   readonly symbols: ReadonlyMap<SymbolId, SymbolRecord>;
   readonly references: readonly Reference[];
   readonly imports: readonly ImportEdge[];
+  /** Every name every module makes available, including re-exports. */
+  readonly exports: readonly ExportedName[];
   readonly literals: readonly LiteralObservation[];
   readonly diagnostics: readonly AnalysisDiagnostic[];
   readonly coverage: Coverage;

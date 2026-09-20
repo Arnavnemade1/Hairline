@@ -943,6 +943,237 @@ const bodyChangeNoNewConsumer: Fixture = {
   },
 };
 
+const barrelNarrowed: Fixture = {
+  name: 'barrel-stops-reexporting-under-new-importer',
+  summary:
+    'Agent A trims the package barrel so it no longer re-exports formatDate; Agent B adds a module importing it from the barrel.',
+  conflict: true,
+  baseline: 'catches',
+  note: 'The declaration is untouched on both branches — only the barrel changed. Nothing in a symbol-level comparison sees this, which is why the export surface is modelled separately.',
+  base: {
+    'src/format.ts': `export function formatDate(value: number): string {
+  return new Date(value).toISOString();
+}
+
+export function formatNumber(value: number): string {
+  return value.toFixed(2);
+}
+`,
+    'src/index.ts': `export { formatDate, formatNumber } from './format.ts';
+`,
+  },
+  branchA: {
+    'src/format.ts': `export function formatDate(value: number): string {
+  return new Date(value).toISOString();
+}
+
+export function formatNumber(value: number): string {
+  return value.toFixed(2);
+}
+`,
+    'src/index.ts': `export { formatNumber } from './format.ts';
+`,
+  },
+  branchB: {
+    'src/format.ts': `export function formatDate(value: number): string {
+  return new Date(value).toISOString();
+}
+
+export function formatNumber(value: number): string {
+  return value.toFixed(2);
+}
+`,
+    'src/index.ts': `export { formatDate, formatNumber } from './format.ts';
+`,
+    'src/report.ts': `import { formatDate } from './index.ts';
+
+export function header(at: number): string {
+  return 'Generated ' + formatDate(at);
+}
+`,
+  },
+  expect: [
+    {
+      category: 'export-conflict',
+      minSeverity: 'high',
+      minConfidence: 'high',
+      mentions: 'formatDate',
+    },
+  ],
+};
+
+const syncBecameAsync: Fixture = {
+  name: 'sync-became-async-under-new-caller',
+  summary:
+    'Agent A makes readConfig asynchronous; Agent B adds a caller that uses the result directly.',
+  conflict: true,
+  baseline: 'catches',
+  note: 'A distinct failure from an ordinary return-type change: the new caller receives a Promise where it expects a value, so the bug surfaces as `[object Promise]` rather than as a type the consumer recognises.',
+  base: {
+    'src/config.ts': `export interface Config { url: string }
+
+export function readConfig(): Config {
+  return { url: 'http://localhost' };
+}
+`,
+  },
+  branchA: {
+    'src/config.ts': `export interface Config { url: string }
+
+export async function readConfig(): Promise<Config> {
+  return { url: 'http://localhost' };
+}
+`,
+  },
+  branchB: {
+    'src/config.ts': `export interface Config { url: string }
+
+export function readConfig(): Config {
+  return { url: 'http://localhost' };
+}
+`,
+    'src/boot.ts': `import { readConfig } from './config.ts';
+
+export function endpoint(): string {
+  return readConfig().url + '/v1';
+}
+`,
+  },
+  expect: [
+    {
+      category: 'signature-conflict',
+      minSeverity: 'high',
+      minConfidence: 'high',
+      symbolsInclude: ['readConfig'],
+    },
+  ],
+};
+
+const memberHidden: Fixture = {
+  name: 'member-visibility-narrowed-under-new-reader',
+  summary:
+    'Agent A makes Session.token private; Agent B adds code that reads session.token.',
+  conflict: true,
+  baseline: 'catches',
+  note: 'Neither the member nor its type changed — only its visibility. That is invisible to a comparison that looks at names and types alone.',
+  base: {
+    'src/session.ts': `export class Session {
+  public token = 'anonymous';
+  refresh(): void {
+    this.token = 'refreshed';
+  }
+}
+`,
+  },
+  branchA: {
+    'src/session.ts': `export class Session {
+  private token = 'anonymous';
+  refresh(): void {
+    this.token = 'refreshed';
+  }
+}
+`,
+  },
+  branchB: {
+    'src/session.ts': `export class Session {
+  public token = 'anonymous';
+  refresh(): void {
+    this.token = 'refreshed';
+  }
+}
+`,
+    'src/audit.ts': `import { Session } from './session.ts';
+
+export function describe(session: Session): string {
+  return 'token=' + session.token;
+}
+`,
+  },
+  expect: [
+    {
+      category: 'type-conflict',
+      minConfidence: 'medium',
+      symbolsInclude: ['Session'],
+    },
+  ],
+};
+
+const negativeExportAdded: Fixture = {
+  name: 'negative--barrel-export-added',
+  summary:
+    'Agent A adds a new name to the barrel; Agent B adds an importer of a name that was always there.',
+  conflict: false,
+  baseline: 'not-applicable',
+  note: 'Widening a surface cannot break an importer. A detector keyed on "the barrel changed" would flag this.',
+  base: {
+    'src/util.ts': `export function a(): number { return 1; }
+export function b(): number { return 2; }
+`,
+    'src/index.ts': `export { a } from './util.ts';
+`,
+  },
+  branchA: {
+    'src/util.ts': `export function a(): number { return 1; }
+export function b(): number { return 2; }
+`,
+    'src/index.ts': `export { a, b } from './util.ts';
+`,
+  },
+  branchB: {
+    'src/util.ts': `export function a(): number { return 1; }
+export function b(): number { return 2; }
+`,
+    'src/index.ts': `export { a } from './util.ts';
+`,
+    'src/use.ts': `import { a } from './index.ts';
+
+export function go(): number {
+  return a();
+}
+`,
+  },
+};
+
+const negativeAsyncCallerAwaits: Fixture = {
+  name: 'negative--sync-became-async-and-new-caller-awaits',
+  summary:
+    'Agent A makes readConfig asynchronous; Agent B adds a caller that already awaits it.',
+  conflict: false,
+  baseline: 'not-applicable',
+  note: 'The direct discriminator for the async rule: the contract change is identical to `sync-became-async-under-new-caller`, and the only difference is that the new call site awaits. Detection must turn on that and nothing else.',
+  base: {
+    'src/config.ts': `export interface Config { url: string }
+
+export function readConfig(): Config {
+  return { url: 'http://localhost' };
+}
+`,
+  },
+  branchA: {
+    'src/config.ts': `export interface Config { url: string }
+
+export async function readConfig(): Promise<Config> {
+  return { url: 'http://localhost' };
+}
+`,
+  },
+  branchB: {
+    'src/config.ts': `export interface Config { url: string }
+
+export function readConfig(): Config {
+  return { url: 'http://localhost' };
+}
+`,
+    'src/boot.ts': `import { readConfig } from './config.ts';
+
+export async function endpoint(): Promise<string> {
+  const config = await readConfig();
+  return config.url + '/v1';
+}
+`,
+  },
+};
+
 export const CORPUS: readonly Fixture[] = [
   unionMemberRemovedTyped,
   unionMemberRemovedWidened,
@@ -962,6 +1193,11 @@ export const CORPUS: readonly Fixture[] = [
   reformatOnly,
   renamedAndUpdated,
   bodyChangeNoNewConsumer,
+  barrelNarrowed,
+  syncBecameAsync,
+  memberHidden,
+  negativeExportAdded,
+  negativeAsyncCallerAwaits,
 ];
 
 export function fixtureByName(name: string): Fixture | undefined {

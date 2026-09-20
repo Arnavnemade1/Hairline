@@ -171,7 +171,8 @@ export const signatureAnalyzer: Analyzer = {
           d.kind === 'parameter-optionality-changed' ||
           d.kind === 'required-arity-changed' ||
           d.kind === 'return-type-changed' ||
-          d.kind === 'nullability-changed',
+          d.kind === 'nullability-changed' ||
+          d.kind === 'async-boundary-changed',
       );
       if (signatureDeltas.length === 0) continue;
 
@@ -196,6 +197,35 @@ export const signatureAnalyzer: Analyzer = {
         (d) => d.kind === 'nullability-changed' && d.nowNullable,
       );
 
+      /**
+       * A synchronous-to-asynchronous change is decidable at a call site whose
+       * handling of the result is known: one that does not await now holds a
+       * Promise where it expected a value. A site that already awaits is fine,
+       * so the finding is raised only for the ones that do not — which is what
+       * keeps the compatible-caller case silent.
+       */
+      const asyncBoundary = signatureDeltas.find((d) => d.kind === 'async-boundary-changed');
+      const unawaitedCalls =
+        asyncBoundary?.kind === 'async-boundary-changed' && asyncBoundary.nowAsync
+          ? calls.filter((call) => call.kind === 'call' && call.awaited === false)
+          : [];
+
+      /**
+       * Crossing the async boundary always changes the return type, so those
+       * two deltas travel together and describe one event. When they are the
+       * *only* change, every new call site that consumes the result as a
+       * promise is already compatible — and `await` on a non-promise is legal,
+       * so the reverse direction is compatible too. Reporting anyway would
+       * flag the correctly-written caller, which is the exact case this
+       * analyzer has to stay quiet about.
+       */
+      const asyncBoundaryOnly =
+        asyncBoundary !== undefined &&
+        signatureDeltas.every(
+          (d) => d.kind === 'async-boundary-changed' || d.kind === 'return-type-changed',
+        );
+      if (asyncBoundaryOnly && unawaitedCalls.length === 0) continue;
+
       const evidence: Evidence[] = signatureDeltas.map((delta) => ({
         kind: 'signature-changed',
         branch: context.producer.label,
@@ -204,30 +234,38 @@ export const signatureAnalyzer: Analyzer = {
         ...(change.after ? { range: change.after.range } : {}),
       }));
 
-      for (const call of (arityBroken.length > 0 ? arityBroken : calls).slice(0, 5)) {
+      const highlighted =
+        arityBroken.length > 0 ? arityBroken : unawaitedCalls.length > 0 ? unawaitedCalls : calls;
+      for (const call of highlighted.slice(0, 5)) {
         evidence.push(
           evidenceForReference(
             context.consumer.label,
             call,
             call.argumentCount !== undefined
-              ? `New call passing ${call.argumentCount} argument${call.argumentCount === 1 ? '' : 's'} in \`${symbolLabel(containingDeclaration(context, call))}\``
+              ? `New call passing ${call.argumentCount} argument${call.argumentCount === 1 ? '' : 's'}${call.awaited === false && unawaitedCalls.length > 0 ? ', and not awaited,' : ''} in \`${symbolLabel(containingDeclaration(context, call))}\``
               : `New ${call.kind} in \`${symbolLabel(containingDeclaration(context, call))}\``,
           ),
         );
       }
 
-      const decidable = arityBroken.length > 0;
+      const decidable = arityBroken.length > 0 || unawaitedCalls.length > 0;
       findings.push(
         buildFinding({
           analyzer: 'signature-change',
           category: 'signature-conflict',
           severity: decidable ? 'high' : nullability ? 'high' : 'medium',
-          confidence: decidable
+          confidence: arityBroken.length > 0
             ? confidence(
                 'high',
                 'arity-mismatch-at-new-call-site',
                 `The new signature requires ${newArity?.requiredParameterCount} argument(s) and the new call site does not supply a compatible count. Decided by counting, not by inference.`,
               )
+            : unawaitedCalls.length > 0
+              ? confidence(
+                  'high',
+                  'result-became-a-promise-at-an-unawaited-call-site',
+                  'The function became asynchronous and the new call site uses its result directly rather than awaiting it, so after the merge that code holds a Promise where it expects a value.',
+                )
             : nullability
               ? confidence(
                   'medium',
@@ -249,13 +287,18 @@ export const signatureAnalyzer: Analyzer = {
           description:
             `${context.producer.label} changes the signature of \`${symbolLabel(id)}\` (${signatureDeltas.map(describeDelta).join('; ')}). ` +
             `${context.consumer.label} adds code that calls it. ` +
-            (decidable
+            (arityBroken.length > 0
               ? `At least one new call site passes an argument count the new signature cannot accept.`
-              : `Whether the new call sites still satisfy the new signature was not checked together on either branch.`),
+              : unawaitedCalls.length > 0
+                ? `${unawaitedCalls.length} of those call ${unawaitedCalls.length === 1 ? 'sites uses' : 'sites use'} the result directly instead of awaiting it.`
+                : `Whether the new call sites still satisfy the new signature was not checked together on either branch.`),
           evidence,
-          verification: decidable
-            ? `Update the new call sites on ${context.consumer.label} to match the new signature.`
-            : `Type-check the merged tree, focusing on calls to \`${symbolLabel(id)}\`.`,
+          verification:
+            unawaitedCalls.length > 0
+              ? `Await the new calls to \`${symbolLabel(id)}\` on ${context.consumer.label}, and make their callers asynchronous.`
+              : decidable
+                ? `Update the new call sites on ${context.consumer.label} to match the new signature.`
+                : `Type-check the merged tree, focusing on calls to \`${symbolLabel(id)}\`.`,
         }),
       );
     }
@@ -285,7 +328,12 @@ export const memberAnalyzer: Analyzer = {
           d.kind === 'member-removed' ||
           d.kind === 'member-renamed' ||
           d.kind === 'member-type-changed' ||
-          d.kind === 'member-optionality-changed',
+          d.kind === 'member-optionality-changed' ||
+          // Modifier changes break consumers just as thoroughly as type
+          // changes, and are easier to make by accident.
+          d.kind === 'member-visibility-changed' ||
+          d.kind === 'member-readonly-changed' ||
+          d.kind === 'member-static-changed',
       );
       if (memberDeltas.length === 0) continue;
 
@@ -295,6 +343,11 @@ export const memberAnalyzer: Analyzer = {
       for (const delta of memberDeltas) {
         const memberName =
           delta.kind === 'member-renamed' ? delta.before : 'name' in delta ? delta.name : undefined;
+        // Narrowing visibility hides the member from outside the class; the
+        // member is still there, so this is not a removal, but every external
+        // reader stops compiling.
+        const hidden =
+          delta.kind === 'member-visibility-changed' && delta.after !== 'public';
         if (memberName === undefined) continue;
 
         // Use sites bind to the member's own identity, not to the containing
@@ -308,6 +361,7 @@ export const memberAnalyzer: Analyzer = {
         if (uses.length === 0) continue;
 
         const removed = delta.kind === 'member-removed' || delta.kind === 'member-renamed';
+        const decidable = removed || hidden || delta.kind === 'member-static-changed';
         const evidence: Evidence[] = [
           {
             kind:
@@ -342,18 +396,30 @@ export const memberAnalyzer: Analyzer = {
           buildFinding({
             analyzer: 'member-change',
             category: removed ? 'definition-use-conflict' : 'type-conflict',
-            severity: removed ? 'high' : 'medium',
+            severity: decidable ? 'high' : 'medium',
             confidence: removed
               ? confidence(
                   'high',
                   'removed-member-still-accessed',
                   'The member does not exist after the merge and the access is new, so it cannot resolve. Decided from the index.',
                 )
-              : confidence(
-                  'medium',
-                  'member-type-changed-under-new-access',
-                  'The member type moved and the accessing code is new. Whether the new type still satisfies the new consumer is not decided here.',
-                ),
+              : hidden
+                ? confidence(
+                    'high',
+                    'member-hidden-under-new-external-access',
+                    'The member is no longer public and the accessing code is new and outside the declaration. Decided from the index: the access cannot compile after the merge.',
+                  )
+                : delta.kind === 'member-static-changed'
+                  ? confidence(
+                      'high',
+                      'member-moved-between-instance-and-static',
+                      'The member moved between the instance and static sides, so every new use site spells the access the wrong way round. Decided from the index.',
+                    )
+                  : confidence(
+                      'medium',
+                      'member-changed-under-new-access',
+                      'The member changed and the accessing code is new. Whether the new shape still satisfies the new consumer is not decided here.',
+                    ),
             branches: [context.producer.label, context.consumer.label],
             symbols: [id, memberSymbolId],
             files: [

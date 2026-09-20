@@ -299,3 +299,165 @@ fires on every healthy repository is a warning nobody reads.
 addition. `local` covers declarations Hairline does not model — destructuring
 patterns, catch parameters — which cannot participate in cross-branch
 interactions anyway.
+
+---
+
+## ADR-0011 — Model a module's export surface separately from its declarations
+
+**Decision.** Index what every module *exports* as first-class data
+(`ExportedName`), diff it across revisions, and analyse it with a dedicated
+analyzer.
+
+**Context.** A probe of the change model found four breaking changes it could
+not see at all. Three were member modifiers ([ADR-0012](#adr-0012)); the fourth
+was a barrel file narrowing its re-exports.
+
+**Why.** In TypeScript the set of names a module *declares* and the set it
+*provides* come apart constantly. A barrel declares nothing:
+
+```ts
+// src/index.ts
+export { formatDate, formatNumber } from './format.ts';   // before
+export { formatNumber } from './format.ts';               // after
+```
+
+`formatDate` is untouched — same file, same signature, same body — but it has
+left the package's entry point. No symbol changed, so nothing in a
+symbol-level comparison fires. Barrels are ubiquitous, which makes this one of
+the easiest ways for two agents to break each other without touching the same
+declaration.
+
+**Chosen approach.** Ask the checker via `getExportsOfModule` rather than
+reading `export` statements. That expands `export *`, follows re-export chains
+to the declaration, and reports renames under the name importers must use —
+none of which is visible syntactically.
+
+**Evidence.** `barrel-stops-reexporting-under-new-importer` in the corpus, and
+its restraint counterpart `negative--barrel-export-added`. Verified on a
+four-way probe covering direct exports, renamed re-exports, `export type`, and
+`export *`.
+
+**Consequences.** `SemanticIndex` gained an `exports` array and
+`BranchChangeSet` gained added/removed export lists — a JSON schema addition.
+Pair pruning had to learn about it too: a removed export meeting a new import
+shares no symbol, file or reference, so the pair would otherwise have been
+skipped before the analyzer ran.
+
+One subtlety cost a debugging round: `typeOnly` must be read from the
+*unaliased* symbol. An alias carries `Alias` flags rather than the flags of
+what it names, so every re-exported value was being labelled type-only.
+
+---
+
+## ADR-0012 — Member modifiers are part of the contract
+
+**Decision.** Diff `visibility`, `readonly` and `static` on type members, and
+treat narrowing visibility or moving between instance and static as decidable
+breakage.
+
+**Why.** All three were silently invisible: `public` → `private`, a member
+gaining `readonly`, and an instance member becoming `static` produced *no
+change at all*. Each breaks every external consumer while leaving the member's
+name and type identical, which is exactly the shape that slips past a
+comparison keyed on names and types.
+
+**Evidence.** `member-visibility-narrowed-under-new-reader` in the corpus. The
+probe that found the gap is reproduced in `docs/research.md`.
+
+**Consequences.** Fixing `static` exposed a deeper bug: `objectShape` returned
+`undefined` for a type with no members, so the differ skipped the comparison
+entirely and *any* type losing its last member — or gaining its first — was
+invisible. Classes also had no static side modelled at all, so a member moving
+between instance and static read as nothing rather than as a move. Both are
+fixed; the empty-shape case is now covered by its own tests.
+
+---
+
+## ADR-0013 — Crossing the async boundary is its own delta
+
+**Decision.** Emit `async-boundary-changed` alongside `return-type-changed`
+when a return type gains or loses a promise wrapper, and record at each call
+site whether the result is consumed as a promise.
+
+**Why.** `User` → `Promise<User>` is nominally just a return-type change, but
+the failure is distinct and more dangerous: a caller that does not `await` now
+holds a Promise where it expects a value, and the symptom is
+`[object Promise]` at runtime rather than a type the consumer recognises.
+
+More importantly it is **decidable**, which the generic case is not — but only
+with an extra fact. `Reference.awaited` records whether a call is awaited,
+`.then`-chained, returned from an async function, or passed to `Promise.all`.
+With it, the rule fires on exactly the call sites that are broken and stays
+silent on the ones that are not.
+
+**Evidence.** The corpus carries the discriminating pair:
+`sync-became-async-under-new-caller` and
+`negative--sync-became-async-and-new-caller-awaits` apply the *identical*
+contract change, differing only in whether the new call site awaits. When that
+negative was first written it produced a false positive, which is what
+prompted the suppression rule: when the async boundary is the only change and
+every new call site handles it, there is nothing to report.
+
+**Consequences.** `consumesAsPromise` is deliberately conservative — it
+recognises the unambiguous forms and answers `false` otherwise. A false
+negative there costs a finding a human would have dismissed; a false positive
+would make the analyzer stay quiet about a real break, which is the worse
+error.
+
+---
+
+## ADR-0014 — Extract full contracts only for the affected subgraph
+
+**Decision.** Compute full contracts for symbols in files that changed between
+the base and any branch, plus the direct importers of those files. Everything
+else gets identity, export status and a body fingerprint.
+
+**Context.** Profiling on a real repository (zod, 522 files) showed indexing
+was 8.0 s per revision, of which **7.6 s was contract extraction** across
+23,972 declarations. Identifier resolution — which earlier profiling on a toy
+project had suggested was the concern — was 744 ms, and the bare AST walk 23 ms.
+
+The earlier "parsing is 2% of the cost" measurement was taken on a 51-file
+project and did not generalise.
+
+**Why this scope is sound.** Measured over real zod merge pairs, **a merge pair
+touches a mean of 1.0% of files**. The other 99% are byte-identical on base and
+both branches, so their symbols compare equal whatever detail is recorded —
+`typeText` undefined on both sides yields no delta, exactly as identical
+`typeText` would. Nothing spurious can appear, and nothing real can disappear
+for a symbol whose file nobody edited.
+
+The one genuine loss is a symbol whose contract moved *only* because a type it
+imports moved. Widening the scope by one import hop covers the common case
+(`User.status` when `Status` changes). Beyond one hop the change is attributed
+to the symbol that actually changed rather than to each symbol downstream — 
+which is the better report anyway, and is what the literal-set analyzer already
+does with its "also narrows N symbols" grouping.
+
+**Alternatives rejected.** Caching extraction per file by blob oid looks
+obvious and is **unsound**: a file's contracts depend on the whole program, so
+`export function f(): User` changes when `User` changes in another file even
+though `f`'s bytes did not.
+
+**Consequences.** `IndexOptions.contractScope` is optional; omitting it
+computes everything, which is what the unit tests and `--full-contracts` do.
+`typeResolved: false` on an out-of-scope symbol keeps the existing contract:
+the type is *unknown* there, never *absent*.
+
+---
+
+## ADR-0015 — Work in a partial clone
+
+**Decision.** Fall back to a size-free `ls-tree` when the sized form fails, and
+enforce the file-size cap on bytes actually read.
+
+**Why.** Found by running the real-world harness: `ls-tree -l` asks for blob
+sizes, and in a partial clone (`git clone --filter=blob:none`) the blobs are
+absent, so git attempts a network fetch that is slow at best and fails outright
+offline. Every pair errored. CI uses partial clones routinely, so a tool that
+cannot read one is a tool that cannot run in CI.
+
+**Consequences.** When sizes are unavailable the cap is applied after reading
+rather than before, which costs memory on a pathological file but never
+silently skips one. An unknown size is carried as `NaN` rather than `0`
+specifically so it cannot be misread as "empty, therefore fine".

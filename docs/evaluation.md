@@ -30,7 +30,7 @@ evaluation that ignored it would be measuring against nothing.
 
 ## The corpus
 
-`tests/fixtures/corpus.ts` — 18 fixtures, **10 positive / 8 negative**.
+`tests/fixtures/corpus.ts` — 23 fixtures, **13 positive / 10 negative**.
 
 The balance is deliberate. The published static semantic-conflict detectors sit
 around 0.43 precision — 26 false positives for 20 true positives — and the
@@ -74,6 +74,9 @@ label. `premiseFailures` is reported separately from detection results, and
 | `return-became-nullable-under-new-caller` | catches |
 | `same-symbol-divergent-union` | **misses** (git conflicts) |
 | `default-argument-changed-under-new-caller` | **misses** |
+| `barrel-stops-reexporting-under-new-importer` | catches |
+| `sync-became-async-under-new-caller` | catches |
+| `member-visibility-narrowed-under-new-reader` | catches |
 
 **Negative — related edits that are genuinely fine:**
 
@@ -82,13 +85,23 @@ label. `premiseFailures` is reported separately from detection results, and
 `negative--optional-member-added` · `negative--unrelated-modules` ·
 `negative--reformat-versus-real-change` ·
 `negative--renamed-with-all-consumers-updated` ·
-`negative--implementation-changed-no-new-consumer`
+`negative--implementation-changed-no-new-consumer` ·
+`negative--barrel-export-added` ·
+`negative--sync-became-async-and-new-caller-awaits`
 
 Several are paired with a positive that differs in exactly one respect —
 `negative--signature-changed-and-caller-updated` against
 `required-parameter-added-under-new-caller` is the same signature change, with
 the new call site compatible rather than not. That pair is the direct test of
 [ADR-0007](./decisions.md).
+
+`negative--sync-became-async-and-new-caller-awaits` is the same idea applied to
+[ADR-0013](./decisions.md): the *identical* sync-to-async change as its
+positive counterpart, differing only in whether the new call site awaits. It is
+worth noting that when this fixture was first written it produced a **false
+positive** — the analyzer fell through to a generic "signature changed under a
+new call site" rule. The suppression rule that fixed it exists because the
+discriminating negative was written.
 
 ---
 
@@ -100,28 +113,24 @@ git 2.50.1, macOS arm64.
 ```
 Detection
   precision 100.0%   recall 100.0%   F1 100.0%
-  TP 10  FP 0  TN 8  FN 0
+  TP 13  FP 0  TN 10  FN 0
   unmet expectations 0  ok
   fixture premise failures 0  ok
 
 Against the incumbent baseline
-  caught by both              6
+  caught by both              9
   caught only by Hairline     4
     + union-member-removed--widened-consumer
     + union-member-removed--javascript-consumer
     + same-symbol-divergent-union
     + default-argument-changed-under-new-caller
-
-Cost
-  hairline 6825ms total, 379ms per fixture
-  baseline 6141ms total, 341ms per fixture
 ```
 
 `unmet expectations` is a stricter check than detection: several fixtures
 declare the expected *category, severity, confidence and symbols*, so a finding
 that is right by accident still fails.
 
-### Real-world run
+### Real-world run: Hairline on itself
 
 Hairline analysed its own source tree (8,607 LOC, 53 files) across two
 synthetic agent branches — one narrowing the `ConfidenceLevel` union, the other
@@ -133,8 +142,48 @@ indexed 142 file(s) across 3 revision(s) in 1680ms; analysis 34ms
 reference resolution 97.9%
 ```
 
-One finding from 9 + 9 contract changes on a real codebase, with the derived
-symbols correctly grouped into a single report.
+One finding from 9 + 9 contract changes, with the derived symbols correctly
+grouped into a single report.
+
+### Real-world run: history that actually happened
+
+```bash
+npm run validate -- --repo <path> --limit 25
+```
+
+`src/evaluation/real-world.ts` takes every **two-parent merge commit** in a
+repository. Its parents and their merge base are exactly the three revisions
+Hairline needs, and they are a branch pair that really diverged and really
+merged. Nothing is reconstructed or synthesised.
+
+Measured against [zod](https://github.com/colinhacks/zod) (3,232 commits, 477
+TypeScript files):
+
+| | |
+|---|---|
+| Merge pairs analysed | 6 |
+| **Pairs with any finding** | **0** |
+| Time per pair | 7–18 s (three revisions indexed each) |
+| Mean reference resolution | 70% |
+
+Zero findings across six real merges is the restraint result this is meant to
+probe, and it is encouraging — but six pairs is a small sample, and the honest
+caveats are as important as the number:
+
+- **A finding here would be a *candidate* false positive, not a confirmed
+  one.** These merges shipped, but shipping is not proof of correctness: the
+  ASE 2024 study found >9% of textually clean merges fail to build or pass
+  tests. The rate this measures is an upper bound.
+- **70% resolution is low**, and the cause is visible: zod is a monorepo whose
+  dependencies were not installed in the clone, so 2,262 type errors leave
+  large parts of the program typed `any`. Hairline reports this (the coverage
+  warning fires), but a run against a properly installed checkout would see
+  considerably more.
+- **Most merge commits are skipped**, being fast-forwards or touching no
+  TypeScript. Getting a large sample needs many more repositories.
+
+This harness exists so the next person can extend the sample rather than
+re-derive the construction.
 
 ---
 

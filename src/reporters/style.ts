@@ -29,6 +29,25 @@ export const style = {
   enabled: ENABLED,
 };
 
+/**
+ * Strip control characters from text that came out of a repository.
+ *
+ * Findings quote identifiers, type renderings and string literal values from
+ * code Hairline did not write. A literal containing an escape sequence could
+ * otherwise reposition the cursor, recolour the output, or hide lines —
+ * letting analysed code forge or conceal parts of the report. Every
+ * repository-derived string is passed through this before being printed.
+ *
+ * C0 controls, DEL and the C1 range are removed; tabs become spaces so
+ * alignment survives.
+ */
+// eslint-disable-next-line no-control-regex
+const CONTROL_CHARACTERS = /[\u0000-\u0008\u000B-\u001F\u007F-\u009F]/g;
+
+export function sanitize(text: string): string {
+  return text.replace(/\t/g, '  ').replace(CONTROL_CHARACTERS, '');
+}
+
 /** Wrap text to a width, indenting continuation lines. */
 export function wrapText(text: string, width: number, indent = ''): string[] {
   const words = text.split(/\s+/).filter(Boolean);

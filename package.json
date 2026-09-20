@@ -32,7 +32,8 @@
     "fixtures": "node --experimental-strip-types scripts/build-fixtures.ts",
     "evaluate": "node --experimental-strip-types scripts/evaluate.ts",
     "demo": "node --experimental-strip-types scripts/demo.ts",
-    "hairline": "node --experimental-strip-types src/cli/main.ts"
+    "hairline": "node --experimental-strip-types src/cli/main.ts",
+    "validate": "node --experimental-strip-types scripts/validate-real-world.ts"
   },
   "dependencies": {
     "typescript": "5.9.3"

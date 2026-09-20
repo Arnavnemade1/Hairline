@@ -194,6 +194,7 @@ export function objectShape(
   type: ts.Type,
   location: ts.Node,
   declaration?: ts.Node,
+  extraMembers?: readonly MemberShape[],
 ): ObjectShape | undefined {
   // Only genuinely object-like types get a structural shape. Asking a string
   // literal union for its properties returns `String.prototype`, which is both
@@ -203,7 +204,10 @@ export function objectShape(
   const properties = checker.getPropertiesOfType(type);
   const stringIndex = checker.getIndexInfoOfType(type, ts.IndexKind.String);
   const numberIndex = checker.getIndexInfoOfType(type, ts.IndexKind.Number);
-  if (properties.length === 0 && !stringIndex && !numberIndex) return undefined;
+
+  // An object-like type with no members still gets a shape. Returning
+  // `undefined` here would make the differ skip the comparison entirely, so a
+  // type losing its last member — or gaining its first — would be invisible.
 
   const heritage: string[] = [];
   if (
@@ -223,13 +227,42 @@ export function objectShape(
   if (declared) for (const parameter of declared) typeParameters.push(parameter.getText());
 
   return {
-    members: properties
-      .map((p) => memberShape(checker, p, location))
-      .sort((a, b) => a.name.localeCompare(b.name)),
+    members: [...(extraMembers ?? []), ...properties.map((p) => memberShape(checker, p, location))].sort(
+      (a, b) => (a.static === b.static ? a.name.localeCompare(b.name) : a.static ? 1 : -1),
+    ),
     heritage,
     typeParameters,
     hasIndexSignature: stringIndex !== undefined || numberIndex !== undefined,
   };
+}
+
+/**
+ * Members declared on a class's constructor side.
+ *
+ * Returned separately and marked `static: true` so that moving a member
+ * between the instance and static sides shows up as a modifier change rather
+ * than as an unrelated removal plus addition.
+ */
+function staticSideMembers(
+  checker: ts.TypeChecker,
+  declaration: ts.Declaration,
+  location: ts.Node,
+): MemberShape[] | undefined {
+  if (!ts.isClassDeclaration(declaration) && !ts.isClassExpression(declaration)) return undefined;
+  const symbol = checker.getSymbolAtLocation(declaration.name ?? declaration);
+  if (!symbol) return undefined;
+  let staticType: ts.Type | undefined;
+  try {
+    staticType = checker.getTypeOfSymbolAtLocation(symbol, declaration);
+  } catch {
+    return undefined;
+  }
+  if (!staticType) return undefined;
+  return checker
+    .getPropertiesOfType(staticType)
+    // `prototype` is an artefact of the constructor type, not a declared member.
+    .filter((p) => p.getName() !== 'prototype')
+    .map((p) => ({ ...memberShape(checker, p, location), static: true }));
 }
 
 const TOKEN_SEPARATOR = String.fromCharCode(0);
@@ -287,7 +320,12 @@ export function extractContract(context: ContractContext): Contract {
   const callable = callableShapes(checker, type);
   if (callable) contract.callable = callable;
 
-  const object = objectShape(checker, type, location, declaration);
+  // A class has two types: the instance side and the constructor side.
+  // `getTypeAtLocation` gives the instance side, so static members would be
+  // absent from the contract entirely — and moving a member between the two
+  // would read as no change at all.
+  const staticMembers = isTypeDeclaration ? undefined : staticSideMembers(checker, declaration, location);
+  const object = objectShape(checker, type, location, declaration, staticMembers);
   if (object) contract.object = object;
 
   const literals = literalsOfType(checker, type);

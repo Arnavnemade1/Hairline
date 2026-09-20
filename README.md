@@ -113,8 +113,13 @@ Then either run the built binary directly, or `npm link` it onto your PATH:
 ```bash
 node bin/hairline.js analyze --base main --branches agent-a agent-b
 node bin/hairline.js analyze --base main --branch agent-a --branch agent-b --json
+node bin/hairline.js explain 8a47418b --base main --branches agent-a agent-b
 node bin/hairline.js analyzers        # what each analyzer looks for
 ```
+
+`explain <id>` shows one finding in full and **quotes the source at every
+evidence site**, from each branch's own revision — so a reader can settle the
+question from the code rather than from the prose. A unique id prefix is enough.
 
 To run from source without building — which is what the test suite does —
 use `npm run hairline --`:
@@ -132,6 +137,7 @@ npm run hairline -- analyze --base main --branches agent-a agent-b
 | `--min-confidence` | `high` \| `medium` \| `low` (default `medium`) |
 | `--json` | machine-readable report |
 | `--no-installed-deps` | do not read `node_modules` for dependency types |
+| `--full-contracts` | index every file in full, not just the affected subgraph |
 
 **Exit codes** — the primary consumer is a CI step deciding whether to stop:
 
@@ -152,9 +158,10 @@ found".
 | Analyzer | Looks for |
 |---|---|
 | `removed-definition` | a symbol one branch deleted or un-exported, used by code the other added |
+| `export-surface` | a module stopped exporting a name the other branch newly imports — including a **barrel narrowing**, where the declaration itself never changed |
 | `literal-set-change` | a value removed from a type's admissible set, still named by new code |
-| `signature-change` | a call signature changed under a call site the other branch added |
-| `member-change` | a type member changed under a new read or write |
+| `signature-change` | a call signature changed under a new call site — including **sync → async**, where the new caller holds a Promise it never awaits |
+| `member-change` | a member changed under a new read or write — type, optionality, or **`public` → `private`**, `readonly`, `static` |
 | `same-symbol` | both branches left the same contract in different states |
 | `behavioral-risk` | a changed default or constant under new consumers — a prompt, not a verdict |
 
@@ -167,13 +174,13 @@ for that level, and **what to check**.
 ## Honest positioning
 
 **Already solved, and conceded.** A GitHub merge queue running `tsc --noEmit`
-as a required check catches type-visible cross-branch breakage for free. On 6
-of the 10 positive fixtures, Hairline adds *attribution* ("branch A removed it,
+as a required check catches type-visible cross-branch breakage for free. On 9
+of the 13 positive fixtures, Hairline adds *attribution* ("branch A removed it,
 branch B added the consumer") and *timing* (PR-open rather than queue-head),
 not detection. Textual conflict resolution belongs to
 [Mergiraf](https://mergiraf.org/) and Hairline does not compete with it.
 
-**Where it adds detection.** 4 of 10 are invisible to that baseline: a consumer
+**Where it adds detection.** 4 of 13 are invisible to that baseline: a consumer
 whose type has been widened to `string`; a JavaScript consumer with no types;
 two branches leaving the same contract in different states; a changed default
 argument with a byte-identical signature. This is measured, not asserted —
@@ -196,16 +203,22 @@ Current numbers, caveats, and what is still unmeasured:
 ```
 Detection
   precision 100.0%   recall 100.0%   F1 100.0%
-  TP 10  FP 0  TN 8  FN 0
+  TP 13  FP 0  TN 10  FN 0
 
 Against the incumbent baseline
-  caught by both              6
+  caught by both              9
   caught only by Hairline     4
 ```
 
-**18 fixtures, 10 positive and 8 negative.** The balance is deliberate: the
+**23 fixtures, 13 positive and 10 negative.** The balance is deliberate: the
 published static semantic-conflict detectors sit around 0.43 precision, and the
 failure mode that kills a pre-merge gate is noise, not misses.
+
+Several negatives are *discriminators*: they apply the identical contract
+change as a positive and differ in exactly one respect.
+`sync-became-async-under-new-caller` and its negative differ only in whether
+the new call site awaits. When that negative was first written it produced a
+false positive — the suppression rule that fixed it exists because of it.
 
 **100% on 18 hand-built fixtures is a statement about the fixtures**, which
 were written alongside the analyzers by the same author. Precision on data

@@ -99,6 +99,7 @@ text, and it is not read at all.
 | Total snapshot bytes | 512 MiB | `limit-exceeded`, remaining files not indexed |
 | File count | 50,000 | `limit-exceeded`, truncated |
 | Alias chain depth | 16 hops | stops; cyclic re-exports cannot loop forever |
+| Contract extraction time | 20 s per revision | remaining symbols indexed by identity only, `limit-exceeded` **error** |
 | Parent-chain walk | 64 hops | stops |
 | Import BFS depth | 8 hops | stops |
 | Binary content | NUL in first 8 KiB | treated as binary, skipped |
@@ -108,6 +109,13 @@ Excluded by default: `node_modules/`, `.git/`, `dist/`, `build/`, `out/`,
 
 Deeply nested syntax is tested directly (400 levels of nesting) and does not
 exhaust the stack.
+
+The time budget is an availability control, not just a convenience: rendering a
+type can be arbitrarily expensive, and a sufficiently recursive conditional
+type will hold the checker on a single declaration indefinitely. A repository
+could contain one by accident or on purpose. Exhausting the budget degrades to
+identity-only indexing and raises an **error**-severity diagnostic, so the run
+reads as incomplete rather than clean.
 
 Every limit produces a diagnostic. A truncated analysis must read as
 *incomplete*, never as *clean*.
@@ -126,16 +134,22 @@ become "nothing found".
 
 ### Hostile content in output
 
-Findings quote identifiers, type text and literal values from the repository.
-Terminal output is written as-is, which means a repository could in principle
-embed ANSI escape sequences in an identifier or string literal.
+Findings quote identifiers, type renderings and literal values from code
+Hairline did not write. Without neutralising them, a repository could embed
+escape sequences that reposition the cursor, recolour output or erase lines —
+letting the code under analysis forge or hide parts of the report about itself.
 
-**This is a known gap.** Contract text is not sanitised before rendering.
-Realistically constrained — TypeScript identifiers cannot contain escape
-characters, and the risk is limited to string literal values and JSDoc — but a
-literal containing `[` could manipulate a terminal. Sanitising control
-characters in `src/reporters/human.ts` is the fix and has not been done. The
-JSON reporter is unaffected: `JSON.stringify` escapes control characters.
+Every repository-derived string passes through `sanitize` before being
+printed: C0 controls, DEL and the C1 range are removed, and tabs become spaces
+so alignment survives. Sanitising happens at the output boundary, not in the
+model, so the stored contract keeps the real value.
+
+Verified by `tests/unit/output-safety.test.ts`, including the path where it is
+actually load-bearing: **member names are not JSON-encoded anywhere in the
+model**, so a property name containing an escape reaches member deltas and
+rendered symbol ids as a raw control character. Literal *values* are
+`JSON.stringify`d and are therefore already safe, and the JSON reporter is
+unaffected for the same reason.
 
 ---
 

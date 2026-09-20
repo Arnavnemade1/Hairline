@@ -1,4 +1,4 @@
-import type { LanguageId } from '../core/model/ids.ts';
+import type { LanguageId, ModulePath } from '../core/model/ids.ts';
 import type { RepositorySnapshot, SemanticIndex } from '../core/model/snapshot.ts';
 
 /**
@@ -28,6 +28,36 @@ export interface AdapterCapabilities {
 }
 
 export interface IndexOptions {
+  /**
+   * Modules whose symbols need full contracts.
+   *
+   * Extracting a contract means asking the checker to render types, list
+   * members and resolve signatures, and on a real repository that is where
+   * essentially all the indexing time goes. A real merge pair touches around
+   * 1% of files, so computing full contracts for the other 99% is wasted:
+   * those symbols are byte-identical on both sides and will compare equal
+   * whatever detail is recorded.
+   *
+   * Symbols outside the scope still get identity, export status and a body
+   * fingerprint — enough for the differ to see that nothing changed — but not
+   * the expensive facets. Omit to compute everything, which is what the unit
+   * tests do.
+   */
+  readonly contractScope?: ReadonlySet<ModulePath>;
+  /**
+   * Wall-clock budget for contract extraction, in milliseconds.
+   *
+   * Rendering a type can be arbitrarily expensive: a sufficiently recursive
+   * conditional type will keep the checker busy for minutes on a single
+   * declaration, and real repositories contain them. A tool that sometimes
+   * takes a quarter of an hour cannot be a pre-merge gate, so extraction stops
+   * paying for detail once the budget is spent and says so in a diagnostic.
+   * Symbols after that point keep identity and a body fingerprint, exactly as
+   * out-of-scope symbols do.
+   *
+   * Zero or negative disables the budget.
+   */
+  readonly contractBudgetMs?: number;
   /**
    * Directory whose `node_modules` may be read for dependency type
    * declarations. Opt-in; absent means dependency types are unavailable and

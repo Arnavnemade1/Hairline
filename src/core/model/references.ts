@@ -43,6 +43,16 @@ export interface Reference {
   readonly argumentCount?: number;
   /** For call references: `true` when the call spreads an array argument. */
   readonly spreadArguments?: boolean;
+  /**
+   * For call references: whether the result is consumed as a promise —
+   * `await f()`, `f().then(...)`, or `return f()` from an async function.
+   *
+   * This is what makes a synchronous-to-asynchronous change decidable rather
+   * than merely suspicious: a new call site that uses the result directly
+   * receives a Promise where it expects a value, while one that already awaits
+   * is unaffected. Absent when the reference is not a call.
+   */
+  readonly awaited?: boolean;
 }
 
 /** A module-to-module edge, independent of which symbols crossed it. */
@@ -59,6 +69,30 @@ export interface ImportEdge {
   readonly typeOnly: boolean;
   /** `import()` / `require()` rather than a static import. */
   readonly dynamic: boolean;
+}
+
+/**
+ * One name a module makes available to importers.
+ *
+ * Modelled separately from the symbols a module *declares*, because the two
+ * come apart constantly in TypeScript. A barrel file declares nothing and
+ * exports everything; narrowing `export { a, b }` to `export { b }` removes
+ * `a` from the package's public surface while `a` itself is untouched. Only
+ * a view of the surface catches that.
+ */
+export interface ExportedName {
+  /** The module doing the exporting. */
+  readonly module: ModulePath;
+  /** The name as importers must spell it. */
+  readonly name: string;
+  /** The declaration it ultimately resolves to, when that is in this repository. */
+  readonly target?: SymbolId;
+  /** Rendered type of the exported value, when available. */
+  readonly typeText?: string;
+  readonly typeOnly: boolean;
+  /** True when the name arrives via `export * from`, rather than being named. */
+  readonly viaStar: boolean;
+  readonly range: SourceRange;
 }
 
 /**

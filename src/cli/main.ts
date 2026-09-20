@@ -2,6 +2,8 @@ import process from 'node:process';
 import { run } from '../run.ts';
 import { renderHuman } from '../reporters/human.ts';
 import { renderJson } from '../reporters/json.ts';
+import { findingsMatching, renderExplanation } from '../reporters/explain.ts';
+import { style } from '../reporters/style.ts';
 import { DEFAULT_ANALYZERS } from '../core/analysis/engine.ts';
 import { ArgumentError, flagEnabled, flagValue, flagValues, parseArgs } from './args.ts';
 
@@ -33,6 +35,7 @@ const USAGE = `hairline ${VERSION} — semantic integration engine
 USAGE
   hairline analyze --base <ref> --branch <ref> --branch <ref> [options]
   hairline analyze --base main --branches agent-a agent-b
+  hairline explain <finding-id> --base main --branches agent-a agent-b
   hairline analyzers
   hairline --version
 
@@ -46,6 +49,10 @@ OPTIONS
   --no-installed-deps       Do not read node_modules for dependency types
   --quiet                   Print nothing on success
   --help                    Show this message
+
+EXPLAIN
+  hairline explain <id> re-runs the analysis and shows one finding in full,
+  quoting the source at every evidence site. A unique id prefix is enough.
 
 EXIT CODES
   0 nothing found   1 findings reported   2 bad usage   3 analysis failed
@@ -81,9 +88,66 @@ async function commandAnalyze(args: ReturnType<typeof parseArgs>): Promise<numbe
     process.stdout.write(`${renderJson(result, VERSION)}\n`);
   } else if (!flagEnabled(args, 'quiet') || result.findings.length > 0) {
     process.stdout.write(renderHuman(result));
+    if (result.findings.length > 0) {
+      process.stdout.write(
+        style.dim(`  Run \`hairline explain ${result.findings[0]!.id} ...\` to see one in full.\n\n`),
+      );
+    }
   }
 
   return result.findings.length > 0 ? EXIT.findings : EXIT.clean;
+}
+
+/**
+ * Re-run the analysis and show one finding in full.
+ *
+ * Re-running rather than caching keeps the command honest: the explanation is
+ * always of the branches as they stand now, so it cannot describe a finding
+ * that a since-pushed commit has already resolved.
+ */
+async function commandExplain(args: ReturnType<typeof parseArgs>): Promise<number> {
+  const [wanted, ...rest] = args.positional;
+  if (wanted === undefined) {
+    process.stderr.write(`hairline: explain needs a finding id.\n  hairline explain <id> --base main --branches a b\n`);
+    return EXIT.usage;
+  }
+
+  const branches = [...new Set([...flagValues(args, 'branch'), ...flagValues(args, 'branches'), ...rest])];
+  if (branches.length < 2) {
+    process.stderr.write(`hairline: explain needs the same two or more branches the finding came from.\n`);
+    return EXIT.usage;
+  }
+
+  const result = await run({
+    repositoryPath: flagValue(args, 'repo') ?? process.cwd(),
+    base: flagValue(args, 'base') ?? 'main',
+    branches,
+    // Explaining a finding must work even for one below the reporting
+    // threshold — otherwise an id from a `--min-confidence low` run could not
+    // be looked up.
+    minimumConfidence: 'low',
+    useInstalledDependencies: !flagEnabled(args, 'no-installed-deps'),
+  });
+
+  const matches = findingsMatching(result, wanted);
+  if (matches.length === 0) {
+    process.stderr.write(
+      `hairline: no finding with id starting \`${wanted}\` in this analysis.\n` +
+        (result.findings.length > 0
+          ? `  Available: ${result.findings.map((f) => f.id).join(', ')}\n`
+          : `  This analysis produced no findings.\n`),
+    );
+    return EXIT.usage;
+  }
+  if (matches.length > 1) {
+    process.stderr.write(
+      `hairline: \`${wanted}\` matches ${matches.length} findings: ${matches.map((f) => f.id).join(', ')}\n`,
+    );
+    return EXIT.usage;
+  }
+
+  process.stdout.write(renderExplanation(result, matches[0]!));
+  return EXIT.findings;
 }
 
 function commandAnalyzers(): number {
@@ -121,6 +185,8 @@ export async function main(argv: readonly string[]): Promise<number> {
       case 'analyze':
       case 'analyse':
         return await commandAnalyze(args);
+      case 'explain':
+        return await commandExplain(args);
       case 'analyzers':
         return commandAnalyzers();
       default:

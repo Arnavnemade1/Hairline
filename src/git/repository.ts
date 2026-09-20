@@ -73,36 +73,57 @@ export class GitRepository {
     return stdout.trim();
   }
 
+  /** Raw `git log` access, for callers that need a specific format. */
+  async log(args: readonly string[]): Promise<{ stdout: string }> {
+    const { stdout } = await git(this.root, ['log', ...args]);
+    return { stdout };
+  }
+
   async commitSubject(revision: string): Promise<string> {
     const { stdout } = await git(this.root, ['log', '-1', '--format=%s', revision]);
     return stdout.trim();
   }
 
-  /** Every regular file reachable from a revision's tree. */
+  /**
+   * Every regular file reachable from a revision's tree.
+   *
+   * `-l` asks for blob sizes, which lets oversized files be skipped before
+   * their contents are ever read. In a partial clone (`--filter=blob:none`,
+   * which CI uses routinely) the blobs are not present, so asking for sizes
+   * forces a network fetch that is slow at best and fails outright when the
+   * remote is unreachable. Falling back to a size-free listing keeps Hairline
+   * working there: the size cap is then enforced after the read instead of
+   * before it, which costs memory on a pathological file but never silently
+   * skips one.
+   */
   async listTree(revision: string): Promise<TreeEntry[]> {
-    const { stdout } = await git(this.root, [
-      'ls-tree',
-      '-r',
-      '-l',
-      '-z',
-      '--full-tree',
-      revision,
-    ]);
+    let sized = true;
+    let result = await git(
+      this.root,
+      ['ls-tree', '-r', '-l', '-z', '--full-tree', revision],
+      { allowFailure: true },
+    );
+    if (result.code !== 0) {
+      sized = false;
+      result = await git(this.root, ['ls-tree', '-r', '-z', '--full-tree', revision]);
+    }
+    const { stdout } = result;
     const entries: TreeEntry[] = [];
     for (const record of stdout.split('\0')) {
       if (record === '') continue;
-      // "<mode> <type> <oid> <size>\t<path>"
+      // "<mode> <type> <oid>[ <size>]\t<path>"
       const tab = record.indexOf('\t');
       if (tab < 0) continue;
       const meta = record.slice(0, tab).split(/\s+/);
       const path = record.slice(tab + 1);
       const mode = meta[0];
       const oid = meta[2];
-      const sizeText = meta[3];
       if (!mode || !oid) continue;
       if (mode !== MODE_BLOB && mode !== MODE_BLOB_EXEC) continue;
-      const size = Number(sizeText);
-      entries.push({ mode, oid, size: Number.isFinite(size) ? size : 0, path });
+      // An unknown size must not read as zero-and-therefore-fine; when sizes
+      // are unavailable every entry is admitted and capped after reading.
+      const size = sized ? Number(meta[3]) : Number.NaN;
+      entries.push({ mode, oid, size: Number.isFinite(size) ? size : Number.NaN, path });
     }
     return entries;
   }

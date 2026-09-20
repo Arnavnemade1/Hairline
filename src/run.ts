@@ -6,7 +6,8 @@ import { TypeScriptAdapter } from './languages/typescript/adapter.ts';
 import { AdapterRegistry, type LanguageAdapter } from './languages/adapter.ts';
 import { analyze, type AnalysisResult, type BranchInput, type EngineOptions } from './core/analysis/engine.ts';
 import type { AnalysisDiagnostic } from './core/model/diagnostics.ts';
-import type { SemanticIndex } from './core/model/snapshot.ts';
+import type { RepositorySnapshot, SemanticIndex } from './core/model/snapshot.ts';
+import type { ModulePath } from './core/model/ids.ts';
 
 export interface RunOptions extends EngineOptions {
   readonly repositoryPath: string;
@@ -23,6 +24,15 @@ export interface RunOptions extends EngineOptions {
    * analysed. When a revision changes `package.json`, a diagnostic says so.
    */
   readonly useInstalledDependencies?: boolean;
+  /**
+   * Extract full contracts for every file rather than only the affected ones.
+   *
+   * Slower by roughly the ratio of repository size to changed-file count, and
+   * only needed when analysing something other than a branch pair — the
+   * evaluation harness uses it so that fixtures are indexed exactly as a unit
+   * test would index them.
+   */
+  readonly fullContracts?: boolean;
 }
 
 /** Everything the CLI and the JSON reporter need. */
@@ -33,6 +43,16 @@ export interface RunResult extends AnalysisResult {
   /** What `git merge-tree` says about merging each pair, with no commit made. */
   readonly mergeability: readonly MergeCheck[];
   readonly timings: Readonly<Record<string, number>>;
+  /**
+   * Source of one file as it stands on one branch.
+   *
+   * Findings point at positions, and a position is only meaningful together
+   * with the revision it came from. Carrying the snapshots lets `explain`
+   * quote the actual code rather than asking the reader to check out each
+   * branch in turn — and guarantees the quoted lines are the ones the analysis
+   * actually saw, not whatever the working tree happens to hold now.
+   */
+  sourceFor(branch: string, module: ModulePath): string | undefined;
 }
 
 export interface MergeCheck {
@@ -57,8 +77,12 @@ function indexSnapshot(
   adapter: LanguageAdapter,
   snapshot: Parameters<LanguageAdapter['index']>[0],
   nodeModulesRoot: string | undefined,
+  contractScope: ReadonlySet<ModulePath> | undefined,
 ): SemanticIndex {
-  return adapter.index(snapshot, nodeModulesRoot ? { nodeModulesRoot } : {});
+  return adapter.index(snapshot, {
+    ...(nodeModulesRoot ? { nodeModulesRoot } : {}),
+    ...(contractScope ? { contractScope } : {}),
+  });
 }
 
 /**
@@ -106,16 +130,44 @@ export async function run(options: RunOptions): Promise<RunResult> {
       ? repo.root
       : undefined;
 
+  /**
+   * Files any branch touched, relative to the base.
+   *
+   * Only these — and, inside the adapter, their direct importers — need full
+   * contracts. On real merge pairs this is on the order of 1% of the
+   * repository, and the rest is byte-identical on every side, so recording
+   * detail for it cannot produce a difference. Set `fullContracts` to analyse
+   * everything, at roughly two orders of magnitude more checker work.
+   */
+  const contractScope: Set<ModulePath> | undefined = options.fullContracts
+    ? undefined
+    : new Set(
+        (
+          await Promise.all(
+            options.branches.map((branch) => repo.changedFiles(mergeBase, branchRevisions[branch]!)),
+          )
+        ).flatMap((changes) =>
+          changes.flatMap((change) =>
+            change.previousPath ? [change.path, change.previousPath] : [change.path],
+          ),
+        ),
+      );
+
   const indexStart = performance.now();
   const baseBuild = await buildSnapshot(repo, mergeBase, options.base, policy);
-  const baseIndex = indexSnapshot(adapter, baseBuild.snapshot, nodeModulesRoot);
+  const baseIndex = indexSnapshot(adapter, baseBuild.snapshot, nodeModulesRoot, contractScope);
   diagnostics.push(...baseBuild.diagnostics);
 
+  const snapshots = new Map<string, RepositorySnapshot>([[options.base, baseBuild.snapshot]]);
   const branchInputs: BranchInput[] = [];
   for (const branch of options.branches) {
     const build = await buildSnapshot(repo, branchRevisions[branch]!, branch, policy);
+    snapshots.set(branch, build.snapshot);
     diagnostics.push(...build.diagnostics);
-    branchInputs.push({ label: branch, index: indexSnapshot(adapter, build.snapshot, nodeModulesRoot) });
+    branchInputs.push({
+      label: branch,
+      index: indexSnapshot(adapter, build.snapshot, nodeModulesRoot, contractScope),
+    });
 
     // Dependency types come from the working tree, so a branch that changes
     // its manifest is being analysed against the wrong dependency versions.
@@ -166,5 +218,6 @@ export async function run(options: RunOptions): Promise<RunResult> {
     branchRevisions,
     mergeability,
     timings,
+    sourceFor: (branch, module) => snapshots.get(branch)?.read(module),
   };
 }

@@ -9,6 +9,7 @@ import {
 import type { SourceRange } from '../../core/model/source.ts';
 import type { ExportKind, SymbolFlags, SymbolRecord } from '../../core/model/symbols.ts';
 import type {
+  ExportedName,
   ImportEdge,
   LiteralObservation,
   Reference,
@@ -16,13 +17,14 @@ import type {
 } from '../../core/model/references.ts';
 import type { AnalysisDiagnostic } from '../../core/model/diagnostics.ts';
 import { declaredName, hasModifier, symbolKindOf } from './kinds.ts';
-import { extractContract, typeText } from './contracts.ts';
+import { bodyHash, extractContract, typeText as typeTextOf } from './contracts.ts';
 import type { SnapshotProgram } from './program.ts';
 
 export interface ExtractionResult {
   readonly symbols: Map<SymbolId, SymbolRecord>;
   readonly references: Reference[];
   readonly imports: ImportEdge[];
+  readonly exports: ExportedName[];
   readonly literals: LiteralObservation[];
   readonly diagnostics: AnalysisDiagnostic[];
   readonly resolvedReferenceCount: number;
@@ -91,6 +93,17 @@ function flagsOf(node: ts.Node): SymbolFlags {
     if ((node.parent.flags & ts.NodeFlags.Const) !== 0) flags.const = true;
   }
   return flags;
+}
+
+/**
+ * Identity-and-body only, for declarations outside the contract scope.
+ *
+ * `typeResolved: false` is the honest marker: the type is *unknown* here, not
+ * absent. Nothing downstream may read a missing facet as evidence of anything.
+ */
+function cheapContract(declaration: ts.Declaration): { typeResolved: false; bodyHash?: string } {
+  const hash = bodyHash(declaration);
+  return hash ? { typeResolved: false, bodyHash: hash } : { typeResolved: false };
 }
 
 function docSummaryOf(node: ts.Node): string | undefined {
@@ -183,6 +196,44 @@ function literalValueOf(node: ts.Node): string | undefined {
   return undefined;
 }
 
+const PROMISE_METHODS = new Set(['then', 'catch', 'finally']);
+
+/**
+ * Whether a call's result is treated as a promise at the call site.
+ *
+ * Deliberately conservative: it recognises the forms where the intent is
+ * unambiguous and answers `false` otherwise. A false negative here makes an
+ * analyzer report something a human then dismisses; a false positive would
+ * make it stay quiet about a real break, which is the worse error.
+ */
+function consumesAsPromise(call: ts.Node): boolean {
+  const parent = call.parent;
+  if (!parent) return false;
+  if (ts.isAwaitExpression(parent)) return true;
+  // `f().then(...)` — the call is the object of a promise method.
+  if (ts.isPropertyAccessExpression(parent) && parent.expression === call) {
+    return PROMISE_METHODS.has(parent.name.text);
+  }
+  // `return f()` from an async function, or `yield f()`.
+  if (ts.isReturnStatement(parent) || ts.isYieldExpression(parent)) {
+    let enclosing: ts.Node | undefined = parent;
+    while (enclosing && !ts.isFunctionLike(enclosing)) enclosing = enclosing.parent;
+    return enclosing !== undefined && hasModifier(enclosing, ts.SyntaxKind.AsyncKeyword);
+  }
+  // An arrow body: `const go = async () => f()`.
+  if (ts.isArrowFunction(parent) && parent.body === call) {
+    return hasModifier(parent, ts.SyntaxKind.AsyncKeyword);
+  }
+  // `Promise.all([f(), g()])` and friends.
+  if (ts.isArrayLiteralExpression(parent) && parent.parent && ts.isCallExpression(parent.parent)) {
+    const callee = parent.parent.expression;
+    return ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.expression)
+      ? callee.expression.text === 'Promise'
+      : false;
+  }
+  return false;
+}
+
 const EQUALITY_OPERATORS: ReadonlySet<ts.SyntaxKind> = new Set([
   ts.SyntaxKind.EqualsEqualsToken,
   ts.SyntaxKind.EqualsEqualsEqualsToken,
@@ -197,12 +248,80 @@ const EQUALITY_OPERATORS: ReadonlySet<ts.SyntaxKind> = new Set([
  * second pass able to say *which* symbol a use site refers to; a single pass
  * cannot, because a file may reference a declaration that appears later.
  */
-export function extract(snapshotProgram: SnapshotProgram): ExtractionResult {
+/** Default wall-clock budget for contract extraction. */
+export const DEFAULT_CONTRACT_BUDGET_MS = 20_000;
+
+/** Declarations between budget checks; `Date.now()` per declaration is itself a cost. */
+const BUDGET_CHECK_INTERVAL = 64;
+
+export function extract(
+  snapshotProgram: SnapshotProgram,
+  contractScope?: ReadonlySet<ModulePath>,
+  contractBudgetMs: number = DEFAULT_CONTRACT_BUDGET_MS,
+): ExtractionResult {
   const { checker, sourceFiles, fromVirtual } = snapshotProgram;
+
+  /**
+   * Widen a caller's scope by one import hop.
+   *
+   * A symbol's contract can move because a type it *imports* moved —
+   * `User.status` changes when `Status` does, without `user.ts` being edited.
+   * Including the direct importers of every in-scope module catches that,
+   * which is the case that matters in practice, while still leaving the
+   * overwhelming majority of an unchanged repository untouched. Derivations
+   * further than one hop are attributed to the symbol that actually changed
+   * rather than to each symbol downstream of it.
+   */
+  const effectiveScope: ReadonlySet<ModulePath> | undefined = (() => {
+    if (!contractScope) return undefined;
+    const widened = new Set(contractScope);
+    for (const file of sourceFiles) {
+      const module = fromVirtual(file.fileName);
+      if (module === undefined || widened.has(module)) continue;
+      for (const statement of file.statements) {
+        if (!ts.isImportDeclaration(statement) && !ts.isExportDeclaration(statement)) continue;
+        const specifier = statement.moduleSpecifier;
+        if (!specifier || !ts.isStringLiteral(specifier)) continue;
+        const resolved = checker
+          .getSymbolAtLocation(specifier)
+          ?.declarations?.find(ts.isSourceFile);
+        const target = resolved ? fromVirtual(resolved.fileName) : undefined;
+        if (target !== undefined && contractScope.has(target)) {
+          widened.add(module);
+          break;
+        }
+      }
+    }
+    return widened;
+  })();
+
+  const inScope = (module: ModulePath): boolean =>
+    effectiveScope === undefined || effectiveScope.has(module);
+
+  const budgetStart = Date.now();
+  let examined = 0;
+  let budgetSpent = false;
+  let skippedForBudget = 0;
+
+  /**
+   * Whether there is still time to compute a full contract.
+   *
+   * Checked in batches rather than per declaration, and latched once spent so
+   * the clock is not consulted again.
+   */
+  const withinBudget = (): boolean => {
+    if (budgetSpent) return false;
+    if (contractBudgetMs <= 0) return true;
+    if (++examined % BUDGET_CHECK_INTERVAL !== 0) return true;
+    if (Date.now() - budgetStart < contractBudgetMs) return true;
+    budgetSpent = true;
+    return false;
+  };
 
   const symbols = new Map<SymbolId, SymbolRecord>();
   const references: Reference[] = [];
   const imports: ImportEdge[] = [];
+  const exports: ExportedName[] = [];
   const literals: LiteralObservation[] = [];
   const diagnostics: AnalysisDiagnostic[] = [];
   /** ts.Declaration -> the identity we minted for it. */
@@ -252,14 +371,20 @@ export function extract(snapshotProgram: SnapshotProgram): ExtractionResult {
         declarationIds.set(node, id);
 
         const location = (node as { name?: ts.Node }).name ?? node;
-        const contract = extractContract({
-          checker,
-          declaration: node as ts.Declaration,
-          location,
-          isTypeDeclaration: TYPE_DECLARATION_KINDS.has(kind),
-        });
+        // Outside the scope, a cheap contract: enough to notice that nothing
+        // changed, without paying the checker for detail nobody will read.
+        const affordable = inScope(module) && withinBudget();
+        if (inScope(module) && !affordable) skippedForBudget++;
+        const contract = affordable
+          ? extractContract({
+              checker,
+              declaration: node as ts.Declaration,
+              location,
+              isTypeDeclaration: TYPE_DECLARATION_KINDS.has(kind),
+            })
+          : cheapContract(node as ts.Declaration);
 
-        if (!contract.typeResolved && kind !== 'module') {
+        if (affordable && !contract.typeResolved && kind !== 'module') {
           diagnostics.push({
             code: 'type-unavailable',
             severity: 'info',
@@ -380,10 +505,75 @@ export function extract(snapshotProgram: SnapshotProgram): ExtractionResult {
     return undefined;
   };
 
+  /**
+   * Ask the checker what a module actually exports.
+   *
+   * Going through `getExportsOfModule` rather than reading `export` statements
+   * means `export * from './x'` is expanded, re-exports are followed to their
+   * declaration, and renames (`export { a as b }`) are reported under the name
+   * importers must use — none of which is visible syntactically.
+   */
+  const collectExports = (file: ts.SourceFile, module: ModulePath): void => {
+    const moduleSymbol = checker.getSymbolAtLocation(file);
+    if (!moduleSymbol) return;
+    let exported: ts.Symbol[];
+    try {
+      exported = checker.getExportsOfModule(moduleSymbol);
+    } catch {
+      return;
+    }
+    const declaredHere = new Set<string>();
+    for (const statement of file.statements) {
+      if (ts.isExportDeclaration(statement) && statement.exportClause && ts.isNamedExports(statement.exportClause)) {
+        for (const element of statement.exportClause.elements) declaredHere.add(element.name.text);
+      }
+    }
+
+    for (const symbol of exported) {
+      const name = symbol.getName();
+      const target = idForSymbol(symbol);
+      const declaration = symbol.declarations?.[0];
+      const range =
+        declaration && declaration.getSourceFile() === file
+          ? rangeOf(declaration, module)
+          : { module, startLine: 1, startColumn: 1, endLine: 1, endColumn: 1 };
+
+      // An alias symbol carries `Alias` flags, not the flags of what it names,
+      // so a re-exported value would be mislabelled type-only unless the alias
+      // is resolved first.
+      const resolved = unalias(checker, symbol);
+      let typeText: string | undefined;
+      const typeSite = resolved.valueDeclaration ?? resolved.declarations?.[0];
+      if (typeSite) {
+        try {
+          typeText = typeTextOf(checker, checker.getTypeAtLocation(typeSite));
+        } catch {
+          typeText = undefined;
+        }
+      }
+
+      exports.push({
+        module,
+        name,
+        typeOnly: (resolved.flags & ts.SymbolFlags.Value) === 0,
+        // A name that no `export {}` clause in this file mentions, and whose
+        // declaration lives elsewhere, arrived through `export *`.
+        viaStar:
+          !declaredHere.has(name) &&
+          declaration !== undefined &&
+          declaration.getSourceFile() !== file,
+        range,
+        ...(target ? { target } : {}),
+        ...(typeText !== undefined ? { typeText } : {}),
+      });
+    }
+  };
+
   for (const file of sourceFiles) {
     const module = fromVirtual(file.fileName);
     if (module === undefined) continue;
     const moduleId = makeModuleId('ts', module);
+    collectExports(file, module);
 
     /** Nearest enclosing declaration we gave an identity to. */
     const enclosingId = (node: ts.Node): SymbolId => {
@@ -420,7 +610,7 @@ export function extract(snapshotProgram: SnapshotProgram): ExtractionResult {
           type = undefined;
         }
         if (type) {
-          observation.siteTypeText = typeText(checker, type);
+          observation.siteTypeText = typeTextOf(checker, type);
           // The named type that constrains this position, if it has one. For
           // `user.status === 'disabled'` this is the `Status` alias — the
           // handle that ties the observation to whoever changed that type.
@@ -648,6 +838,7 @@ export function extract(snapshotProgram: SnapshotProgram): ExtractionResult {
             const args = call.arguments ?? [];
             reference.argumentCount = args.length;
             if (args.some((a) => ts.isSpreadElement(a))) reference.spreadArguments = true;
+            if (kind === 'call') reference.awaited = consumesAsPromise(call);
           }
         }
 
@@ -660,10 +851,22 @@ export function extract(snapshotProgram: SnapshotProgram): ExtractionResult {
     ts.forEachChild(file, visit);
   }
 
+  if (skippedForBudget > 0) {
+    diagnostics.push({
+      code: 'limit-exceeded',
+      severity: 'error',
+      message:
+        `Contract extraction exceeded its ${contractBudgetMs}ms budget; ${skippedForBudget} symbol(s) ` +
+        `were indexed by identity only. Contract comparisons involving them are incomplete — ` +
+        `re-run with a larger budget to analyse them.`,
+    });
+  }
+
   return {
     symbols,
     references,
     imports,
+    exports,
     literals,
     diagnostics,
     resolvedReferenceCount,

@@ -248,3 +248,72 @@ describe('reporting on a real repository', () => {
     }
   });
 });
+
+describe('explain', () => {
+  test('renders one finding in full, quoting source from both branches', async () => {
+    const built = buildFixture(fixtureByName('union-member-removed--typed-consumer')!);
+    try {
+      const analysis = await hairline([
+        'analyze', '--repo', built.repositoryPath, '--base', 'main',
+        '--branches', 'agent-a', 'agent-b', '--json',
+      ]);
+      const id = (JSON.parse(analysis.stdout) as { findings: Array<{ id: string }> }).findings[0]!.id;
+
+      const result = await hairline([
+        'explain', id, '--repo', built.repositoryPath, '--base', 'main',
+        '--branches', 'agent-a', 'agent-b',
+      ]);
+      assert.equal(result.code, 1);
+      assert.match(result.stdout, new RegExp(`Finding ${id}`));
+      assert.match(result.stdout, /What Hairline thinks happened/);
+      assert.match(result.stdout, /Evidence, with the code at each site/);
+      assert.match(result.stdout, /Why this confidence, and what it is not/);
+      // The point of the command: real source, not just prose about it.
+      assert.match(result.stdout, /export type Status/);
+      // And it must say plainly that the level is not a probability.
+      assert.match(result.stdout, /not a probability/);
+    } finally {
+      built.cleanup();
+    }
+  });
+
+  test('accepts a unique id prefix', async () => {
+    const built = buildFixture(fixtureByName('export-removed-under-new-importer')!);
+    try {
+      const analysis = await hairline([
+        'analyze', '--repo', built.repositoryPath, '--base', 'main',
+        '--branches', 'agent-a', 'agent-b', '--json',
+      ]);
+      const id = (JSON.parse(analysis.stdout) as { findings: Array<{ id: string }> }).findings[0]!.id;
+      const result = await hairline([
+        'explain', id.slice(0, 5), '--repo', built.repositoryPath, '--base', 'main',
+        '--branches', 'agent-a', 'agent-b',
+      ]);
+      assert.equal(result.code, 1);
+      assert.match(result.stdout, new RegExp(`Finding ${id}`));
+    } finally {
+      built.cleanup();
+    }
+  });
+
+  test('an unknown id is a usage error that lists what is available', async () => {
+    const built = buildFixture(fixtureByName('export-removed-under-new-importer')!);
+    try {
+      const result = await hairline([
+        'explain', 'deadbeef', '--repo', built.repositoryPath, '--base', 'main',
+        '--branches', 'agent-a', 'agent-b',
+      ]);
+      assert.equal(result.code, 2);
+      assert.match(result.stderr, /no finding with id starting/);
+      assert.match(result.stderr, /Available:/);
+    } finally {
+      built.cleanup();
+    }
+  });
+
+  test('explain without an id is a usage error', async () => {
+    const result = await hairline(['explain']);
+    assert.equal(result.code, 2);
+    assert.match(result.stderr, /needs a finding id/);
+  });
+});
