@@ -189,7 +189,7 @@ re-derive the construction.
 
 ## What these numbers do not say
 
-**100% precision on 18 fixtures is a statement about the fixtures.** They were
+**100% precision on 23 fixtures is a statement about the fixtures.** They were
 written alongside the analyzers, by the same author, in the same sitting. That
 is unavoidable for a first corpus and it is not evidence of real-world
 precision. The published detectors that *were* measured on independent data
@@ -197,9 +197,11 @@ sit at 0.43–0.85; IntelliMerge self-reported 88% precision and an independent
 replication found 50% incorrect merges. Hairline should be assumed closer to
 that world until measured on data it did not author.
 
-**The corpus is small and synthetic.** 18 fixtures of a few files each. Real
-repositories have generics, decorators, dependency injection, barrel files,
-declaration merging, and monorepo boundaries — none of which appear here.
+**The corpus is small and synthetic.** 23 fixtures of a few files each. Barrel
+files are now represented, but generics, decorators, dependency injection,
+declaration merging and monorepo boundaries are not. The indexer handles those
+shapes — verified separately on real repositories — but no *fixture* exercises
+a conflict through one.
 
 **Recall is unmeasurable from this corpus.** It can only say Hairline finds the
 conflicts that were written for it. The genuinely interesting number — what
@@ -220,13 +222,19 @@ repositories and requires no new tool.
 the class exists and that Hairline can see it. It does not establish how often
 that class occurs in practice.
 
+**The capabilities added in the second pass mostly land in the baseline's
+half.** Barrel narrowing, `public` → `private` and sync → async are all things
+a merged-tree type check also catches. They were added because the change model
+was *silently blind* to them — a gap worth closing on its own terms — but they
+widen coverage rather than widen the differentiator.
+
 ---
 
 ## Honest accounting of where value comes from
 
-Of the 10 positive fixtures:
+Of the 13 positive fixtures:
 
-- **6** are also caught by type-checking the merged tree. On these Hairline
+- **9** are also caught by type-checking the merged tree. On these Hairline
   adds *attribution* ("branch A removed it, branch B added the consumer")
   and *timing* (PR-open rather than queue-head), not detection. A repository
   with a merge queue already has the detection.

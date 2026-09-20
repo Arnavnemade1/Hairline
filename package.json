@@ -29,7 +29,6 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --test --experimental-strip-types \"tests/**/*.test.ts\"",
     "test:unit": "node --test --experimental-strip-types \"tests/unit/**/*.test.ts\"",
-    "fixtures": "node --experimental-strip-types scripts/build-fixtures.ts",
     "evaluate": "node --experimental-strip-types scripts/evaluate.ts",
     "demo": "node --experimental-strip-types scripts/demo.ts",
     "hairline": "node --experimental-strip-types src/cli/main.ts",
