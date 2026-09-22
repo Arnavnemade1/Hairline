@@ -112,11 +112,18 @@ treating full behavioural semantics as tractable would be repeating that.
   PRs**; at ±7 days, 95%. Cross-agent textual conflict rate **41.7%** vs 19.8%
   intra-agent. They decline to measure semantic conflicts and call their
   numbers a *"conservative lower-bound"*.
+- **[Brun, Holmes, Ernst & Notkin](https://homes.cs.washington.edu/~mernst/pubs/vc-conflicts-tse2013.pdf)** (*IEEE TSE* 39(10), 2013 — the
+  Crystal paper): **over 9% of textually clean merges produced by Git failed to
+  build or failed to pass tests.** That 9% is a *lower bound*: it only counts
+  what existing test suites happened to catch.
 - **[ASE 2024 merge evaluation](https://arxiv.org/abs/2410.09934)** (Schesch,
-  Featherman, Yang, Roberts, Ernst): 6,045 merges from 1,120 repositories —
-  **over 9% of textually clean merges failed to build or failed tests**. Their
-  Figure 2 is the Hairline scenario verbatim. That 9% is a *lower bound*: it
-  only counts what existing test suites happened to catch.
+  Featherman, Yang, Roberts, Ernst) evaluates merge *tools* over 6,045 merges
+  from 1,120 repositories, and cites the 9% figure above as motivation. Its
+  Figure 2 is the Hairline scenario verbatim.
+
+  *Correction:* earlier revisions of this document attributed the 9% figure to
+  the ASE 2024 paper's own dataset. It is the 2013 figure, which that paper
+  quotes. Found while verifying citations before publishing them on the site.
 
 Both 2026 flagship agent-PR datasets name semantic conflicts as unmeasured.
 That is an unusually clean statement of an open problem.

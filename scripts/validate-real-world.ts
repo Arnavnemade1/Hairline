@@ -86,8 +86,8 @@ process.stdout.write(
 
 process.stdout.write(
   `\n${style.dim('  These merges shipped, so each finding is a *candidate* false positive.')}\n` +
-    `${style.dim('  Shipping is not proof of correctness: the ASE 2024 study found >9% of')}\n` +
-    `${style.dim('  textually clean merges fail to build or pass tests. Treat this rate as an')}\n` +
+    `${style.dim('  Shipping is not proof of correctness: Brun et al. (IEEE TSE 2013) found')}\n` +
+    `${style.dim('  over 9% of textually clean merges fail to build or pass tests. Treat this rate as an')}\n` +
     `${style.dim('  upper bound, and read the individual findings rather than assuming them wrong.')}\n\n`,
 );
 

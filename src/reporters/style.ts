@@ -11,9 +11,12 @@ const ENABLED =
   process.env.TERM !== 'dumb' &&
   process.stdout.isTTY === true;
 
+/** Written as a code point rather than a raw byte, which would be invisible in the source. */
+const ESC = String.fromCharCode(27);
+
 function wrap(open: number, close: number): (text: string) => string {
-  const prefix = `[${open}m`;
-  const suffix = `[${close}m`;
+  const prefix = `${ESC}[${open}m`;
+  const suffix = `${ESC}[${close}m`;
   return (text: string) => (ENABLED ? `${prefix}${text}${suffix}` : text);
 }
 

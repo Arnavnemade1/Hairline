@@ -171,9 +171,9 @@ probe, and it is encouraging — but six pairs is a small sample, and the honest
 caveats are as important as the number:
 
 - **A finding here would be a *candidate* false positive, not a confirmed
-  one.** These merges shipped, but shipping is not proof of correctness: the
-  ASE 2024 study found >9% of textually clean merges fail to build or pass
-  tests. The rate this measures is an upper bound.
+  one.** These merges shipped, but shipping is not proof of correctness:
+  [Brun et al. (TSE 2013)](https://homes.cs.washington.edu/~mernst/pubs/vc-conflicts-tse2013.pdf) found over 9% of textually clean merges fail
+  to build or pass tests. The rate this measures is an upper bound.
 - **70% resolution is low**, and the cause is visible: zod is a monorepo whose
   dependencies were not installed in the clone, so 2,262 type errors leave
   large parts of the program typed `any`. Hairline reports this (the coverage
@@ -206,9 +206,10 @@ a conflict through one.
 **Recall is unmeasurable from this corpus.** It can only say Hairline finds the
 conflicts that were written for it. The genuinely interesting number — what
 fraction of *real* semantic conflicts it catches — needs historical data. The
-[ASE 2024 figure](https://arxiv.org/abs/2410.09934) that >9% of textually clean
-merges fail to build or pass tests is the target to measure against, and has
-not been.
+finding that over 9% of textually clean merges fail to build or pass tests
+([Brun et al., TSE 2013](https://homes.cs.washington.edu/~mernst/pubs/vc-conflicts-tse2013.pdf), quoted by the
+[ASE 2024 merge-tool evaluation](https://arxiv.org/abs/2410.09934)) is the
+target to measure against, and has not been.
 
 **The timing comparison is not a fair fight, in both directions.** Hairline and
 the baseline run on the same tiny fixtures, where process startup dominates.
