@@ -3,395 +3,733 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Hairline — the conflicts Git merges cleanly</title>
-<meta name="description" content="Hairline is a semantic integration engine. It finds the conflicts between concurrent branches that Git merges cleanly and a type check calls fine." />
-<meta name="theme-color" content="#06070a" />
-<meta property="og:title" content="Hairline — the conflicts Git merges cleanly" />
-<meta property="og:description" content="Git reasons about lines. Hairline reasons about contracts: symbols, references, signatures, and the values a type admits." />
+<title>Hairline — Catch the conflicts Git merges cleanly</title>
+<meta name="description" content="Hairline finds semantic conflicts between concurrent branches: the ones Git merges cleanly and neither branch's tests can see. Open source, runs locally, built for teams running coding agents in parallel." />
+<meta name="theme-color" content="#F7F6F2" />
+<meta name="color-scheme" content="light" />
+<meta property="og:title" content="Hairline — Catch the conflicts Git merges cleanly" />
+<meta property="og:description" content="Semantic conflict detection for concurrent branches. Both branches passed. Main didn't." />
 <meta property="og:type" content="website" />
-<meta name="twitter:card" content="summary_large_image" />
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23c9f24e'/%3E%3Cpath d='M9 8v16M23 8v16M9 16h14' stroke='%2306070a' stroke-width='2.4' stroke-linecap='round'/%3E%3C/svg%3E" />
+<meta name="twitter:card" content="summary" />
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='5' fill='%2316150F'/%3E%3Cpath d='M7 5v14M17 5v14' stroke='%23F7F6F2' stroke-width='2.2' stroke-linecap='round'/%3E%3Cpath d='M7 12h3.2l1.2-2.4 1.6 4.8 1.2-2.4H17' fill='none' stroke='%23FF6A3D' stroke-width='1.7' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E" />
+<script>document.documentElement.classList.add('js')</script>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600&display=swap" />
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wdth,wght@75..100,400..700&amp;family=IBM+Plex+Mono:wght@400;500&amp;display=swap" />
 <link rel="stylesheet" href="./styles.css" />
+<script src="./main.js" defer></script>
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
 
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="mark" viewBox="0 0 24 24">
+      <path d="M6 4v16M18 4v16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" />
+      <path d="M6 12h3.6l1.3-2.6 1.8 5.2 1.3-2.6H18" fill="none" stroke="var(--mark-crack, #CC3812)" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
+    </symbol>
+    <symbol id="i-github" viewBox="0 0 16 16"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></symbol>
+    <symbol id="i-check" viewBox="0 0 16 16"><path d="M3.5 8.5l3 3 6-7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-cross" viewBox="0 0 16 16"><path d="M4.5 4.5l7 7m0-7l-7 7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></symbol>
+    <symbol id="i-arrow" viewBox="0 0 16 16"><path d="M3 8h9m-3.5-3.5L12 8l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 16 16"><rect x="5.5" y="5.5" width="8" height="8" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M10.5 3.5v-.5A1.5 1.5 0 009 1.5H4A1.5 1.5 0 002.5 3v5A1.5 1.5 0 004 9.5h.5" fill="none" stroke="currentColor" stroke-width="1.4"/></symbol>
+  </defs>
+</svg>
+
 <header class="nav" id="nav">
-  <div class="wrap nav__inner">
-    <a class="brand" href="#top" aria-label="Hairline, home">
-      <svg class="brand__mark" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#c9f24e"/><path d="M9 8v16M23 8v16M9 16h14" stroke="#06070a" stroke-width="2.4" stroke-linecap="round"/></svg>
-      <span>hairline</span>
+  <div class="container nav__inner">
+    <a class="brand" href="#top" aria-label="Hairline home">
+      <svg class="brand__mark" aria-hidden="true"><use href="#mark" /></svg>
+      <span class="brand__word">Hairline</span>
     </a>
-    <nav class="nav__links" aria-label="Sections">
-      <a href="#problem">The problem</a>
-      <a href="#detects">What it detects</a>
+
+    <nav class="nav__links" aria-label="Primary">
+      <a href="#catches">What it catches</a>
       <a href="#how">How it works</a>
-      <a href="#honest">Limits</a>
-      <a href="#start">Install</a>
+      <a href="#results">Results</a>
+      <a href="#faq">FAQ</a>
+      <a href="https://github.com/Arnavnemade1/Hairline#readme">Docs</a>
     </nav>
-    <div class="nav__cta">
-      <a class="btn btn--ghost btn--sm" href="https://github.com/arnavnemade1/hairline">GitHub</a>
+
+    <div class="nav__actions">
+      <a class="nav__github" href="https://github.com/Arnavnemade1/Hairline" aria-label="Hairline on GitHub">
+        <svg aria-hidden="true"><use href="#i-github" /></svg><span>GitHub</span>
+      </a>
       <a class="btn btn--primary btn--sm" href="#start">Get started</a>
+      <button class="nav__toggle" type="button" aria-expanded="false" aria-controls="mobile-menu" aria-label="Open menu">
+        <span></span><span></span>
+      </button>
+    </div>
+  </div>
+
+  <div class="mobile-menu" id="mobile-menu" hidden>
+    <div class="container">
+      <a href="#catches">What it catches</a>
+      <a href="#how">How it works</a>
+      <a href="#results">Results</a>
+      <a href="#faq">FAQ</a>
+      <a href="https://github.com/Arnavnemade1/Hairline#readme">Docs</a>
+      <a href="https://github.com/Arnavnemade1/Hairline">GitHub</a>
     </div>
   </div>
 </header>
 
 <main id="main">
 
-<!-- ── hero ─────────────────────────────────────────────── -->
-<section class="hero" id="top">
-  <div class="wrap">
-    <span class="badge"><b>v0.1</b> Apache-2.0 · one dependency · no network</span>
-    <h1>Your merge was clean.<br /><em>Your system is not.</em></h1>
-    <p class="hero__lede">
-      Hairline is a semantic integration engine. It reads each branch as symbols,
-      references, signatures and the concrete values a type admits — then reports
-      where one branch's contract change meets another branch's new code.
-    </p>
-    <div class="hero__cta">
-      <a class="btn btn--primary" href="#start">Run it on your repo</a>
-      <a class="btn btn--ghost" href="#finding">See a real finding &rarr;</a>
-    </div>
-    <p class="hero__note">Node &ge; 22.6 · git &ge; 2.38 · never executes your code</p>
-
-    <div class="term reveal" role="img" aria-label="Terminal transcript: git merges the branches cleanly, a type check of the merged tree passes, and Hairline reports one high severity semantic conflict.">
-      <div class="term__bar">
-        <span class="term__dot"></span><span class="term__dot"></span><span class="term__dot"></span>
-        <span class="term__title">npm run demo — every line produced by actually doing the thing</span>
-      </div>
-<pre class="term__body"><span class="term__step"><span class="c-dim">$</span> <span class="c-cmd">git merge-tree --write-tree agent-a agent-b</span>
-<span class="c-dim">1d860353c4bfd39783d17e090d409f7ba0c38109</span>
-<span class="c-ok">exit 0 — merges cleanly, no textual conflict</span></span>
-<span class="term__step"><span class="c-dim">$</span> <span class="c-cmd">tsc --noEmit</span>  <span class="c-dim">on each branch, then on the merged tree</span>
-agent-a  <span class="c-ok">PASS</span>    agent-b  <span class="c-ok">PASS</span>    merged  <span class="c-ok">PASS</span>
-<span class="c-dim">this is what a merge queue with a required type check would see</span></span>
-<span class="term__step"><span class="c-dim">$</span> <span class="c-cmd" id="typed">hairline analyze --base main --branches agent-a agent-b</span><span class="caret" id="caret"></span>
-
-  <b>1 likely semantic integration conflict (1 high severity)</b>
-
-<span class="c-high">[1/1] HIGH</span>   agent-a removes <span class="c-accent">"disabled"</span> from <b>Status (src/user.ts)</b>;
-             agent-b adds code handling it
-        <span class="c-info">literal-set-conflict</span>  confidence: medium  <span class="c-dim">id 8a47418b3ed1</span></span></pre>
-    </div>
-  </div>
-</section>
-
-<!-- ── stats ────────────────────────────────────────────── -->
-<section class="rule" style="padding-block: clamp(40px, 5vw, 64px)">
-  <div class="wrap">
-    <div class="stats reveal">
-      <div class="stat"><div class="stat__n">100%</div><div class="stat__l">precision and recall on 23 fixtures</div></div>
-      <div class="stat"><div class="stat__n">4 / 13</div><div class="stat__l">positives a type check cannot see</div></div>
-      <div class="stat"><div class="stat__n">1.7 s</div><div class="stat__l">to index three revisions of 8,607 LOC</div></div>
-      <div class="stat"><div class="stat__n">34 ms</div><div class="stat__l">of analysis on that same repository</div></div>
-      <div class="stat"><div class="stat__n">0</div><div class="stat__l">network calls, writes, or lines of your code run</div></div>
-    </div>
-  </div>
-</section>
-
-<!-- ── problem ──────────────────────────────────────────── -->
-<section id="problem">
-  <div class="wrap">
-    <div class="head reveal">
-      <p class="eyebrow">The problem</p>
-      <h2>Git reasons about lines. The interesting failures are not textual.</h2>
-      <p class="lede">
-        Two agents work on one repository at the same time. Each one changes a
-        different file. Each one passes its own tests. The merge is clean, and
-        the system is broken.
-      </p>
-    </div>
-
-    <div class="split">
-      <div class="flow reveal">
-        <div class="flow__row">
-          <div class="flow__branch">
-            <h4>agent-a</h4>
-            <ul>
-              <li>changes a shared contract</li>
-              <li class="pass">its own tests pass</li>
-            </ul>
-          </div>
-          <div class="flow__branch">
-            <h4>agent-b</h4>
-            <ul>
-              <li>changes a consumer of it</li>
-              <li class="pass">its own tests pass</li>
-            </ul>
-          </div>
+  <!-- Hero -->
+  <section class="hero" id="top">
+    <div class="container">
+      <div class="hero__copy">
+        <h1 class="hero__title">Both branches passed.<br />Main didn&rsquo;t.</h1>
+        <p class="hero__lede">
+          Hairline catches semantic conflicts between concurrent branches&thinsp;&mdash;&thinsp;the
+          ones Git merges cleanly and neither branch&rsquo;s tests can see. Built for teams
+          running coding agents in parallel.
+        </p>
+        <div class="hero__actions">
+          <a class="btn btn--primary btn--lg" href="#start">Get started</a>
+          <a class="btn btn--secondary btn--lg" href="https://github.com/Arnavnemade1/Hairline">
+            <svg aria-hidden="true"><use href="#i-github" /></svg> View on GitHub
+          </a>
         </div>
-        <div class="flow__join"><span>└──────────── merge ────────────┘</span></div>
-        <div class="flow__result flow__result--ok">git merge-tree — clean ✓</div>
-        <div class="flow__result flow__result--ok">tsc --noEmit on the merged tree — clean ✓</div>
-        <div class="flow__result">the value no longer exists; the new branch is dead code ✗</div>
+        <ul class="hero__facts" aria-label="Key facts">
+          <li>Open source</li>
+          <li>Runs locally</li>
+          <li>Never executes your code</li>
+          <li>TypeScript &amp; JavaScript</li>
+        </ul>
       </div>
 
-      <div class="reveal">
-        <div class="anno">
-          <div class="anno__item"><span class="anno__dot"></span><div>
-            <h3>The type check is not a safety net here</h3>
-            <p>The consumer takes a <code>string</code>, not a <code>Status</code>. By the time the value arrives, the type system has widened it away — so the merged tree type-checks, and the branch simply becomes unreachable at runtime.</p>
-          </div></div>
-          <div class="anno__item"><span class="anno__dot"></span><div>
-            <h3>Attribution, at the time the pull request opens</h3>
-            <p>A merge queue tells you that the head is red. Hairline tells you which branch removed the contract, which branch added the consumer, and at what position in each — before either branch reaches the queue.</p>
-          </div></div>
-          <div class="anno__item"><span class="anno__dot"></span><div>
-            <h3>Only fresh use sites count</h3>
-            <p>An interaction is reported only when the consuming branch introduced or edited the use site. If the site already existed at the base, that branch is broken on its own and its own CI catches it. This is the main reason the negative fixtures stay silent.</p>
-          </div></div>
+      <figure class="product" aria-labelledby="product-caption">
+        <figcaption id="product-caption" class="sr-only">
+          Output for two branches that share a base. Git merges them cleanly and a type check of the
+          merged tree passes, but Hairline reports one high-severity semantic conflict.
+        </figcaption>
+
+        <div class="product__bar">
+          <svg class="product__mark" aria-hidden="true"><use href="#mark" /></svg>
+          <code class="product__cmd"><span>hairline analyze</span> --base main --branches agent-a agent-b</code>
+          <span class="product__status">1 conflict</span>
+        </div>
+
+        <ol class="checks">
+          <li class="check check--ok" style="--i:0">
+            <span class="check__label">git merge</span>
+            <span class="check__value"><svg aria-hidden="true"><use href="#i-check" /></svg>Clean</span>
+            <span class="check__note">No textual conflict</span>
+          </li>
+          <li class="check check--ok" style="--i:1">
+            <span class="check__label">Type check, merged tree</span>
+            <span class="check__value"><svg aria-hidden="true"><use href="#i-check" /></svg>Passes</span>
+            <span class="check__note"><code>tsc --noEmit</code>, 0 errors</span>
+          </li>
+          <li class="check check--bad" style="--i:2">
+            <span class="check__label">Hairline</span>
+            <span class="check__value"><svg aria-hidden="true"><use href="#i-cross" /></svg>1 conflict</span>
+            <span class="check__note">High severity</span>
+          </li>
+        </ol>
+
+        <div class="finding">
+          <div class="finding__meta">
+            <span class="sev">High</span>
+            <span class="finding__kind">literal-set-conflict</span>
+            <span class="finding__conf">medium confidence</span>
+            <span class="finding__id">8a47418b3ed1</span>
+          </div>
+          <p class="finding__title">
+            agent-a removes <code class="lit">"disabled"</code> from <code>Status</code>; agent-b adds code handling it
+          </p>
+
+          <div class="evidence">
+            <div class="evidence__side">
+              <div class="evidence__head"><span class="branch">agent-a</span><span class="path">src/user.ts:1</span></div>
+<pre class="diff diff--night"><span class="ln ln--del"><span class="g">-</span><span class="k">export type</span> Status = <span class="s">'active'</span> | <span class="s">'suspended'</span> | <span class="s">'disabled'</span>;</span>
+<span class="ln ln--add"><span class="g">+</span><span class="k">export type</span> Status = <span class="s">'active'</span> | <span class="s">'suspended'</span>;</span></pre>
+            </div>
+            <div class="evidence__side">
+              <div class="evidence__head"><span class="branch">agent-b</span><span class="path">src/render.ts:5</span></div>
+<pre class="diff diff--night"><span class="ln"><span class="g"> </span><span class="k">export function</span> renderBadge(status: <span class="t">string</span>): <span class="t">string</span> {</span>
+<span class="ln ln--add"><span class="g">+</span>  <span class="k">if</span> (status === <span class="s">'disabled'</span>) <span class="k">return</span> <span class="s">'&lt;span class="danger" /&gt;'</span>;</span></pre>
+            </div>
+          </div>
+
+          <p class="finding__why">
+            <code>renderBadge</code> takes a plain <code>string</code>, so a type check can&rsquo;t see that
+            <code class="lit">"disabled"</code> no longer exists. After the merge, that branch is dead code.
+          </p>
+        </div>
+      </figure>
+    </div>
+  </section>
+
+  <!-- Why now -->
+  <section class="why" id="why">
+    <div class="container">
+      <div class="section-head">
+        <h2>Agents work in parallel. Nobody tests their changes together.</h2>
+        <p>
+          Every branch is green on its own. The combination is what breaks&thinsp;&mdash;&thinsp;and
+          it&rsquo;s the one thing no branch&rsquo;s CI ever runs.
+        </p>
+      </div>
+
+      <div class="stats">
+        <div class="stat">
+          <p class="stat__value">9%<span>+</span></p>
+          <p class="stat__label">of textually clean merges fail to build or pass their tests.</p>
+          <a class="stat__source" href="https://homes.cs.washington.edu/~mernst/pubs/vc-conflicts-tse2013.pdf">Brun, Holmes, Ernst &amp; Notkin &middot; IEEE TSE 2013</a>
+        </div>
+        <div class="stat">
+          <p class="stat__value">79%</p>
+          <p class="stat__label">of agent-authored pull requests are open at the same time as another one in the same repository.</p>
+          <a class="stat__source" href="https://arxiv.org/abs/2607.04697">Xu, Subramanian &amp; Karthik &middot; 2026 &middot; 33,596 PRs</a>
+        </div>
+        <div class="stat">
+          <p class="stat__value">1 in 5</p>
+          <p class="stat__label">concurrent agent pull requests hit a merge conflict, even when one agent wrote both.</p>
+          <a class="stat__source" href="https://arxiv.org/abs/2607.04697">Same study &middot; 747 replayed merges</a>
+        </div>
+      </div>
+
+      <p class="why__gap">
+        Those are the conflicts Git can see. Both large 2026 studies of agent pull requests&thinsp;&mdash;&thinsp;<a
+        href="https://arxiv.org/abs/2604.03551">AgenticFlict</a>, across 142,652 PRs, and
+        <a href="https://arxiv.org/abs/2607.04697">Xu et al.</a>&thinsp;&mdash;&thinsp;counted only textual
+        conflicts. The ones that merge cleanly and break anyway went unmeasured.
+      </p>
+    </div>
+  </section>
+
+  <!-- What it catches -->
+  <section class="catches" id="catches">
+    <div class="container">
+      <div class="section-head">
+        <h2>Contract changes that pass review on both sides.</h2>
+        <p>
+          Six real scenarios from Hairline&rsquo;s test corpus. Each one merges cleanly, and each branch
+          type-checks on its own. Where a type check of the merged tree <em>also</em> catches it, we say so.
+        </p>
+      </div>
+
+      <div class="explorer" data-tabs>
+        <div class="explorer__list" role="tablist" aria-label="Conflict scenarios" aria-orientation="vertical">
+          <button role="tab" id="t-value" aria-controls="p-value" aria-selected="true" tabindex="0">
+            <span class="tab__title">A value is removed</span>
+            <span class="tab__meta tab__meta--only">Only Hairline</span>
+          </button>
+          <button role="tab" id="t-js" aria-controls="p-js" aria-selected="false" tabindex="-1">
+            <span class="tab__title">An untyped caller</span>
+            <span class="tab__meta tab__meta--only">Only Hairline</span>
+          </button>
+          <button role="tab" id="t-default" aria-controls="p-default" aria-selected="false" tabindex="-1">
+            <span class="tab__title">A default changes</span>
+            <span class="tab__meta tab__meta--only">Only Hairline &middot; low confidence</span>
+          </button>
+          <button role="tab" id="t-barrel" aria-controls="p-barrel" aria-selected="false" tabindex="-1">
+            <span class="tab__title">A barrel stops exporting</span>
+            <span class="tab__meta">Type check also catches</span>
+          </button>
+          <button role="tab" id="t-async" aria-controls="p-async" aria-selected="false" tabindex="-1">
+            <span class="tab__title">A function goes async</span>
+            <span class="tab__meta">Type check also catches</span>
+          </button>
+          <button role="tab" id="t-private" aria-controls="p-private" aria-selected="false" tabindex="-1">
+            <span class="tab__title">A field goes private</span>
+            <span class="tab__meta">Type check also catches</span>
+          </button>
+        </div>
+
+        <div class="explorer__panels">
+
+          <!-- value -->
+          <div class="scene is-active" role="tabpanel" id="p-value" aria-labelledby="t-value" tabindex="0">
+            <p class="scene__story">agent-a narrows <code>Status</code>. agent-b, working at the same time, adds a renderer that still handles <code class="lit">"disabled"</code>&thinsp;&mdash;&thinsp;through a parameter typed as a plain <code>string</code>.</p>
+            <div class="scene__diffs">
+              <div class="codecard">
+                <div class="codecard__head"><span class="branch">agent-a</span><span class="path">src/user.ts</span></div>
+<pre class="diff"><span class="ln ln--del"><span class="g">-</span><span class="k">export type</span> Status = <span class="s">'active'</span> | <span class="s">'suspended'</span> | <span class="s">'disabled'</span>;</span>
+<span class="ln ln--add"><span class="g">+</span><span class="k">export type</span> Status = <span class="s">'active'</span> | <span class="s">'suspended'</span>;</span></pre>
+              </div>
+              <div class="codecard">
+                <div class="codecard__head"><span class="branch">agent-b</span><span class="path">src/render.ts</span></div>
+<pre class="diff"><span class="ln"><span class="g"> </span><span class="k">export function</span> renderBadge(status: <span class="t">string</span>): <span class="t">string</span> {</span>
+<span class="ln"><span class="g"> </span>  <span class="k">if</span> (status === <span class="s">'active'</span>) <span class="k">return</span> <span class="s">'&lt;span class="ok" /&gt;'</span>;</span>
+<span class="ln ln--add"><span class="g">+</span>  <span class="k">if</span> (status === <span class="s">'disabled'</span>) <span class="k">return</span> <span class="s">'&lt;span class="danger" /&gt;'</span>;</span>
+<span class="ln"><span class="g"> </span>  <span class="k">return</span> <span class="s">'&lt;span class="muted" /&gt;'</span>;</span></pre>
+              </div>
+            </div>
+            <dl class="verdicts">
+              <div><dt>git merge</dt><dd class="v-ok"><svg aria-hidden="true"><use href="#i-check" /></svg>Clean</dd></div>
+              <div><dt>Type check, merged tree</dt><dd class="v-miss"><svg aria-hidden="true"><use href="#i-check" /></svg>Passes&thinsp;&mdash;&thinsp;misses it</dd></div>
+              <div><dt>Hairline</dt><dd class="v-bad"><svg aria-hidden="true"><use href="#i-cross" /></svg>High &middot; medium confidence</dd></div>
+            </dl>
+            <div class="scene__finding">
+              <span class="scene__rule">literal-set-conflict &middot; removed-literal-observed-at-widened-site</span>
+              <p>agent-a removes <code class="lit">"disabled"</code> from <code>Status</code>; agent-b adds code handling it</p>
+            </div>
+          </div>
+
+          <!-- js -->
+          <div class="scene" role="tabpanel" id="p-js" aria-labelledby="t-js" tabindex="0">
+            <p class="scene__story">The same narrowing, but the new consumer is a JavaScript file. There are no types to check, so a type check of the merged tree is clean by construction.</p>
+            <div class="scene__diffs">
+              <div class="codecard">
+                <div class="codecard__head"><span class="branch">agent-a</span><span class="path">src/user.ts</span></div>
+<pre class="diff"><span class="ln ln--del"><span class="g">-</span><span class="k">export type</span> Status = <span class="s">'active'</span> | <span class="s">'suspended'</span> | <span class="s">'disabled'</span>;</span>
+<span class="ln ln--add"><span class="g">+</span><span class="k">export type</span> Status = <span class="s">'active'</span> | <span class="s">'suspended'</span>;</span></pre>
+              </div>
+              <div class="codecard">
+                <div class="codecard__head"><span class="branch">agent-b</span><span class="path">src/legacy.js</span></div>
+<pre class="diff"><span class="ln"><span class="g"> </span><span class="k">export function</span> describe(status) {</span>
+<span class="ln"><span class="g"> </span>  <span class="k">if</span> (status === <span class="s">'active'</span>) <span class="k">return</span> <span class="s">'Active'</span>;</span>
+<span class="ln ln--add"><span class="g">+</span>  <span class="k">if</span> (status === <span class="s">'disabled'</span>) <span class="k">return</span> <span class="s">'Disabled'</span>;</span>
+<span class="ln"><span class="g"> </span>  <span class="k">return</span> <span class="s">'Unknown '</span> + DEFAULT_STATUS;</span></pre>
+              </div>
+            </div>
+            <dl class="verdicts">
+              <div><dt>git merge</dt><dd class="v-ok"><svg aria-hidden="true"><use href="#i-check" /></svg>Clean</dd></div>
+              <div><dt>Type check, merged tree</dt><dd class="v-miss"><svg aria-hidden="true"><use href="#i-check" /></svg>Passes&thinsp;&mdash;&thinsp;misses it</dd></div>
+              <div><dt>Hairline</dt><dd class="v-bad"><svg aria-hidden="true"><use href="#i-cross" /></svg>High &middot; medium confidence</dd></div>
+            </dl>
+            <div class="scene__finding">
+              <span class="scene__rule">literal-set-conflict &middot; removed-literal-observed-at-widened-site</span>
+              <p>agent-a removes <code class="lit">"disabled"</code> from <code>Status</code>; agent-b adds code handling it</p>
+            </div>
+          </div>
+
+          <!-- default -->
+          <div class="scene" role="tabpanel" id="p-default" aria-labelledby="t-default" tabindex="0">
+            <p class="scene__story">agent-a changes a default from 3 retries to 0. The signature is byte-for-byte the same type. agent-b adds a caller that relies on the default.</p>
+            <div class="scene__diffs">
+              <div class="codecard">
+                <div class="codecard__head"><span class="branch">agent-a</span><span class="path">src/http.ts</span></div>
+<pre class="diff"><span class="ln ln--del"><span class="g">-</span><span class="k">export function</span> request(url: <span class="t">string</span>, retries: <span class="t">number</span> = <span class="n">3</span>): <span class="t">string</span> {</span>
+<span class="ln ln--add"><span class="g">+</span><span class="k">export function</span> request(url: <span class="t">string</span>, retries: <span class="t">number</span> = <span class="n">0</span>): <span class="t">string</span> {</span></pre>
+              </div>
+              <div class="codecard">
+                <div class="codecard__head"><span class="branch">agent-b</span><span class="path">src/sync.ts</span></div>
+<pre class="diff"><span class="ln ln--add"><span class="g">+</span><span class="k">import</span> { request } <span class="k">from</span> <span class="s">'./http.ts'</span>;</span>
+<span class="ln ln--add"><span class="g">+</span></span>
+<span class="ln ln--add"><span class="g">+</span><span class="k">export function</span> pull(): <span class="t">string</span> {</span>
+<span class="ln ln--add"><span class="g">+</span>  <span class="k">return</span> request(<span class="s">'/api/sync'</span>);</span></pre>
+              </div>
+            </div>
+            <dl class="verdicts">
+              <div><dt>git merge</dt><dd class="v-ok"><svg aria-hidden="true"><use href="#i-check" /></svg>Clean</dd></div>
+              <div><dt>Type check, merged tree</dt><dd class="v-miss"><svg aria-hidden="true"><use href="#i-check" /></svg>Passes&thinsp;&mdash;&thinsp;misses it</dd></div>
+              <div><dt>Hairline</dt><dd class="v-warn">Medium &middot; low confidence</dd></div>
+            </dl>
+            <div class="scene__finding scene__finding--risk">
+              <span class="scene__rule">behavioral-risk &middot; value-change-under-new-consumer</span>
+              <p>A prompt to look, not a verdict. Hairline can&rsquo;t decide whether behaviour changed, so it says so&thinsp;&mdash;&thinsp;and caps its own confidence.</p>
+            </div>
+          </div>
+
+          <!-- barrel -->
+          <div class="scene" role="tabpanel" id="p-barrel" aria-labelledby="t-barrel" tabindex="0">
+            <p class="scene__story">agent-a trims the package&rsquo;s barrel file. <code>formatDate</code> itself never changes&thinsp;&mdash;&thinsp;it just stops being exported from the entry point agent-b imports from.</p>
+            <div class="scene__diffs">
+              <div class="codecard">
+                <div class="codecard__head"><span class="branch">agent-a</span><span class="path">src/index.ts</span></div>
+<pre class="diff"><span class="ln ln--del"><span class="g">-</span><span class="k">export</span> { formatDate, formatNumber } <span class="k">from</span> <span class="s">'./format.ts'</span>;</span>
+<span class="ln ln--add"><span class="g">+</span><span class="k">export</span> { formatNumber } <span class="k">from</span> <span class="s">'./format.ts'</span>;</span></pre>
+              </div>
+              <div class="codecard">
+                <div class="codecard__head"><span class="branch">agent-b</span><span class="path">src/report.ts</span></div>
+<pre class="diff"><span class="ln ln--add"><span class="g">+</span><span class="k">import</span> { formatDate } <span class="k">from</span> <span class="s">'./index.ts'</span>;</span>
+<span class="ln ln--add"><span class="g">+</span></span>
+<span class="ln ln--add"><span class="g">+</span><span class="k">export function</span> header(at: <span class="t">number</span>): <span class="t">string</span> {</span>
+<span class="ln ln--add"><span class="g">+</span>  <span class="k">return</span> <span class="s">'Generated '</span> + formatDate(at);</span></pre>
+              </div>
+            </div>
+            <dl class="verdicts">
+              <div><dt>git merge</dt><dd class="v-ok"><svg aria-hidden="true"><use href="#i-check" /></svg>Clean</dd></div>
+              <div><dt>Type check, merged tree</dt><dd class="v-catch"><svg aria-hidden="true"><use href="#i-cross" /></svg>Fails&thinsp;&mdash;&thinsp;catches it too</dd></div>
+              <div><dt>Hairline</dt><dd class="v-bad"><svg aria-hidden="true"><use href="#i-cross" /></svg>High &middot; high confidence</dd></div>
+            </dl>
+            <div class="scene__finding">
+              <span class="scene__rule">export-conflict &middot; removed-export-newly-imported</span>
+              <p><code>src/index.ts</code> stops exporting <code>formatDate</code> on agent-a; agent-b newly imports it</p>
+              <p class="scene__tsc"><span>tsc:</span> Module '"./index.ts"' has no exported member 'formatDate'.</p>
+            </div>
+          </div>
+
+          <!-- async -->
+          <div class="scene" role="tabpanel" id="p-async" aria-labelledby="t-async" tabindex="0">
+            <p class="scene__story">agent-a makes <code>readConfig</code> asynchronous. agent-b adds a caller that uses the result directly, so after the merge it holds a <code>Promise</code> where it expects a value.</p>
+            <div class="scene__diffs">
+              <div class="codecard">
+                <div class="codecard__head"><span class="branch">agent-a</span><span class="path">src/config.ts</span></div>
+<pre class="diff"><span class="ln ln--del"><span class="g">-</span><span class="k">export function</span> readConfig(): <span class="t">Config</span> {</span>
+<span class="ln ln--add"><span class="g">+</span><span class="k">export async function</span> readConfig(): <span class="t">Promise</span>&lt;<span class="t">Config</span>&gt; {</span>
+<span class="ln"><span class="g"> </span>  <span class="k">return</span> { url: <span class="s">'http://localhost'</span> };</span></pre>
+              </div>
+              <div class="codecard">
+                <div class="codecard__head"><span class="branch">agent-b</span><span class="path">src/boot.ts</span></div>
+<pre class="diff"><span class="ln ln--add"><span class="g">+</span><span class="k">import</span> { readConfig } <span class="k">from</span> <span class="s">'./config.ts'</span>;</span>
+<span class="ln ln--add"><span class="g">+</span></span>
+<span class="ln ln--add"><span class="g">+</span><span class="k">export function</span> endpoint(): <span class="t">string</span> {</span>
+<span class="ln ln--add"><span class="g">+</span>  <span class="k">return</span> readConfig().url + <span class="s">'/v1'</span>;</span></pre>
+              </div>
+            </div>
+            <dl class="verdicts">
+              <div><dt>git merge</dt><dd class="v-ok"><svg aria-hidden="true"><use href="#i-check" /></svg>Clean</dd></div>
+              <div><dt>Type check, merged tree</dt><dd class="v-catch"><svg aria-hidden="true"><use href="#i-cross" /></svg>Fails&thinsp;&mdash;&thinsp;catches it too</dd></div>
+              <div><dt>Hairline</dt><dd class="v-bad"><svg aria-hidden="true"><use href="#i-cross" /></svg>High &middot; high confidence</dd></div>
+            </dl>
+            <div class="scene__finding">
+              <span class="scene__rule">signature-conflict &middot; result-became-a-promise-at-an-unawaited-call-site</span>
+              <p><code>readConfig</code> became asynchronous on agent-a; the new call site on agent-b never awaits it</p>
+              <p class="scene__tsc"><span>tsc:</span> Property 'url' does not exist on type 'Promise&lt;Config&gt;'.</p>
+            </div>
+          </div>
+
+          <!-- private -->
+          <div class="scene" role="tabpanel" id="p-private" aria-labelledby="t-private" tabindex="0">
+            <p class="scene__story">agent-a narrows a field to <code>private</code>. Its name and type are untouched, which is exactly what makes it easy to miss in review. agent-b adds code that reads it.</p>
+            <div class="scene__diffs">
+              <div class="codecard">
+                <div class="codecard__head"><span class="branch">agent-a</span><span class="path">src/session.ts</span></div>
+<pre class="diff"><span class="ln"><span class="g"> </span><span class="k">export class</span> Session {</span>
+<span class="ln ln--del"><span class="g">-</span>  <span class="k">public</span> token = <span class="s">'anonymous'</span>;</span>
+<span class="ln ln--add"><span class="g">+</span>  <span class="k">private</span> token = <span class="s">'anonymous'</span>;</span></pre>
+              </div>
+              <div class="codecard">
+                <div class="codecard__head"><span class="branch">agent-b</span><span class="path">src/audit.ts</span></div>
+<pre class="diff"><span class="ln ln--add"><span class="g">+</span><span class="k">import</span> { Session } <span class="k">from</span> <span class="s">'./session.ts'</span>;</span>
+<span class="ln ln--add"><span class="g">+</span></span>
+<span class="ln ln--add"><span class="g">+</span><span class="k">export function</span> describe(session: <span class="t">Session</span>): <span class="t">string</span> {</span>
+<span class="ln ln--add"><span class="g">+</span>  <span class="k">return</span> <span class="s">'token='</span> + session.token;</span></pre>
+              </div>
+            </div>
+            <dl class="verdicts">
+              <div><dt>git merge</dt><dd class="v-ok"><svg aria-hidden="true"><use href="#i-check" /></svg>Clean</dd></div>
+              <div><dt>Type check, merged tree</dt><dd class="v-catch"><svg aria-hidden="true"><use href="#i-cross" /></svg>Fails&thinsp;&mdash;&thinsp;catches it too</dd></div>
+              <div><dt>Hairline</dt><dd class="v-bad"><svg aria-hidden="true"><use href="#i-cross" /></svg>High &middot; high confidence</dd></div>
+            </dl>
+            <div class="scene__finding">
+              <span class="scene__rule">type-conflict &middot; member-hidden-under-new-external-access</span>
+              <p><code>Session.token</code> became private on agent-a under a new read on agent-b</p>
+              <p class="scene__tsc"><span>tsc:</span> Property 'token' is private and only accessible within class 'Session'.</p>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <p class="catches__note">
+        When a type check of the merged tree catches it too, Hairline still gets there first: it runs when the
+        pull request opens, not at the head of a merge queue, and it names the branch that changed the contract
+        and the branch that depends on it.
+      </p>
+    </div>
+  </section>
+
+  <!-- How it works -->
+  <section class="how" id="how">
+    <div class="container">
+      <div class="section-head">
+        <h2>Git compares lines. Hairline compares contracts.</h2>
+      </div>
+
+      <ol class="steps">
+        <li class="step">
+          <h3>Reads three revisions</h3>
+          <p>The merge base and both branches, straight from git objects. Your working tree and <code>HEAD</code> are never touched.</p>
+        </li>
+        <li class="step">
+          <h3>Diffs what each branch promised</h3>
+          <p>Signatures, members, exports and the literal values a type admits&thinsp;&mdash;&thinsp;each branch against the merge base, not line by line.</p>
+        </li>
+        <li class="step">
+          <h3>Flags where they meet</h3>
+          <p>A finding fires only when one branch changes a contract that code <em>newly added</em> on the other branch depends on.</p>
+        </li>
+      </ol>
+
+      <div class="principles">
+        <div class="principle">
+          <svg class="principle__icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l10-6.5z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M4 20L20 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          <h3>Never runs your code</h3>
+          <p>Parsing and type checking only. No installs, no build scripts, no <code>eval</code>.</p>
+        </div>
+        <div class="principle">
+          <svg class="principle__icon" viewBox="0 0 24 24" aria-hidden="true"><rect x="3.5" y="5" width="17" height="11" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8 19.5h8M12 16v3.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          <h3>Stays on your machine</h3>
+          <p>No network calls and no telemetry. One runtime dependency: the TypeScript compiler.</p>
+        </div>
+        <div class="principle">
+          <svg class="principle__icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 3.5h8l4 4v13H6z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><path d="M9 11.5h6M9 15h6M9 8h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          <h3>Evidence, not verdicts</h3>
+          <p>Every finding shows the code on both branches, the rule that fired, and why it&rsquo;s rated as it is.</p>
+        </div>
+        <div class="principle">
+          <svg class="principle__icon" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M8.5 12h7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          <h3>Quiet by default</h3>
+          <p>Code that was already broken on its own stays in its own branch&rsquo;s CI. Hairline only reports what the two branches do together.</p>
         </div>
       </div>
     </div>
-  </div>
-</section>
+  </section>
 
-<!-- ── detects ──────────────────────────────────────────── -->
-<section id="detects" class="rule">
-  <div class="wrap">
-    <div class="head reveal">
-      <p class="eyebrow">What it detects</p>
-      <h2>Seven analyzers, one ordered pair of branches at a time.</h2>
-    </div>
-    <div class="grid reveal">
-      <div class="card"><div class="card__k">removed-definition</div><h3>A deleted symbol, under new code</h3><p>A symbol one branch deleted or un-exported, used by code the other branch added.</p></div>
-      <div class="card"><div class="card__k">export-surface</div><h3>A name that left the barrel</h3><p>A module stopped exporting a name the other branch newly imports — including a barrel narrowing, where the declaration itself never changed.</p></div>
-      <div class="card"><div class="card__k">literal-set-change</div><h3>A value that no longer exists</h3><p>A value removed from the admissible set of a type, still named by new code.</p></div>
-      <div class="card"><div class="card__k">signature-change</div><h3>A call that changed shape</h3><p>A call signature changed under a new call site — including sync to async, where the new caller holds a Promise it never awaits.</p></div>
-      <div class="card"><div class="card__k">member-change</div><h3>A member that moved out of reach</h3><p>A member changed under a new read or write: type, optionality, or <code>public</code> to <code>private</code>, <code>readonly</code>, <code>static</code>.</p></div>
-      <div class="card"><div class="card__k">same-symbol</div><h3>One contract, two states</h3><p>Both branches left the same contract in different states.</p></div>
-      <div class="card"><div class="card__k">behavioral-risk</div><h3>A changed default, under new consumers</h3><p>A changed default or constant under new consumers. A prompt, not a verdict — it refuses to fire without a value-level signal and caps itself at low confidence.</p></div>
-      <div class="card"><div class="card__k">your language next</div><h3>Implement one interface</h3><p>An adapter declares honest capabilities and adds fixtures. One without a type checker still produces useful findings, at a lower confidence — instead of a silent absence that reads as "no conflicts here". <a class="accent" href="https://github.com/arnavnemade1/hairline/blob/main/docs/architecture.md">Architecture &rarr;</a></p></div>
-    </div>
-  </div>
-</section>
-
-<!-- ── finding anatomy ──────────────────────────────────── -->
-<section id="finding">
-  <div class="wrap">
-    <div class="head reveal">
-      <p class="eyebrow">Anatomy of a finding</p>
-      <h2>Evidence with file positions, on a named branch.</h2>
-      <p class="lede">
-        <code>hairline explain &lt;id&gt;</code> quotes the source at every evidence site,
-        from each branch's own revision — so a reader settles the question from the
-        code and not from the prose.
-      </p>
-    </div>
-
-    <div class="term reveal">
-      <div class="term__bar">
-        <span class="term__dot"></span><span class="term__dot"></span><span class="term__dot"></span>
-        <span class="term__title">hairline explain 8a47418b --base main --branches agent-a agent-b</span>
-      </div>
-<pre class="term__body"><span class="c-high">[1/1] HIGH</span>   agent-a removes <span class="c-accent">"disabled"</span> from <b>Status (src/user.ts)</b>;
-             agent-b adds code handling it
-        <span class="c-info">literal-set-conflict</span>  confidence: medium  <span class="c-dim">id 8a47418b3ed1</span>
-
-        agent-a narrows <b>Status (src/user.ts)</b> so that <span class="c-accent">"disabled"</span> is no longer
-        one of its values. agent-b adds 1 site that still names <span class="c-accent">"disabled"</span>.
-        That site is typed loosely enough that type-checking the merged tree
-        would not report this — the code would simply become unreachable at
-        runtime.
-
-        <b>Evidence</b>
-          agent-a  <b>Status</b>: literal <span class="c-accent">"disabled"</span> removed from the admissible set
-                   <span class="c-dim">src/user.ts:1:1</span>
-            <span class="c-high">- "active" | "disabled" | "suspended"</span>
-            <span class="c-ok">+ "active" | "suspended"</span>
-          agent-a  Also narrows 1 symbol(s) typed by it: User.status
-          agent-b  New equality on <span class="c-accent">"disabled"</span> against <b>status</b> — type at the
-                   site is <span class="c-info">string</span>, so a type check cannot see this
-                   <span class="c-dim">src/render.ts:5:18</span>
-
-        <b>Why this confidence</b>
-          The value is named in a module that imports the changed one, but the
-          type at that site has been widened to a primitive. A type check of
-          the merged tree would not flag it; whether the value still reaches
-          this code is not decided here.
-
-        <b>Suggested check</b>
-          Check whether the branch handling <span class="c-accent">"disabled"</span> on agent-b can still be
-          reached, and whether removing the value was intended.</pre>
-    </div>
-  </div>
-</section>
-
-<!-- ── how ──────────────────────────────────────────────── -->
-<section id="how" class="rule">
-  <div class="wrap">
-    <div class="head reveal">
-      <p class="eyebrow">How it works</p>
-      <h2>Five stages. The working tree is never touched.</h2>
-    </div>
-    <div class="pipe reveal">
-      <div class="pipe__step"><div class="pipe__n">01</div><h3>Snapshot</h3><p>Each revision is read from git objects. HEAD and the working tree are asserted unchanged by test.</p></div>
-      <div class="pipe__step"><div class="pipe__n">02</div><h3>Index</h3><p>A virtual <code>ts.Program</code> and a two-pass walk build symbols, references, imports and literal sets.</p></div>
-      <div class="pipe__step"><div class="pipe__n">03</div><h3>Diff</h3><p>Each branch is diffed against the merge base into typed contract deltas.</p></div>
-      <div class="pipe__step"><div class="pipe__n">04</div><h3>Analyze</h3><p>The analyzers run over one ordered pair of branches at a time.</p></div>
-      <div class="pipe__step"><div class="pipe__n">05</div><h3>Report</h3><p>Findings carry evidence, severity, confidence, the rule behind it, and what to check.</p></div>
-    </div>
-
-    <div class="grid reveal" style="margin-top: 18px">
-      <div class="card"><div class="card__k">stable identity</div><h3>Symbol identity never uses line numbers</h3><p><code>ts:src/user.ts#User.status@property</code> survives reformatting and unrelated edits. Positions travel separately, as evidence.</p></div>
-      <div class="card"><div class="card__k">language-agnostic core</div><h3>Adding a language changes nothing else</h3><p>The graph, change model, analyzers and reporters are written against <code>SemanticIndex</code>, never against TypeScript. Capabilities are declared, not inferred.</p></div>
-      <div class="card"><div class="card__k">safety</div><h3>Your repository is untrusted input</h3><p>It never executes repository code, never writes to the repository, and never uses a network. Git is invoked with explicit argument vectors and no shell.</p></div>
-    </div>
-  </div>
-</section>
-
-<!-- ── honest ───────────────────────────────────────────── -->
-<section id="honest">
-  <div class="wrap">
-    <div class="head reveal">
-      <p class="eyebrow">Honest positioning</p>
-      <h2>What this does not do, first.</h2>
-      <p class="lede">
-        The failure mode that kills a pre-merge gate is noise, not misses. So the
-        limits are published next to the results, and the incumbent baseline runs
-        over the same fixtures on every evaluation.
-      </p>
-    </div>
-    <div class="honest reveal">
-      <div class="honest__col">
-        <h3><span class="tag">Conceded</span></h3>
-        <p>A merge queue running <code>tsc --noEmit</code> as a required check catches type-visible cross-branch breakage for free. On 9 of the 13 positive fixtures, Hairline adds attribution and timing, not detection. Textual conflict resolution belongs to Mergiraf, and Hairline does not compete with it.</p>
-      </div>
-      <div class="honest__col">
-        <h3><span class="tag tag--ok">Where it adds detection</span></h3>
-        <p>4 of 13 are invisible to that baseline: a consumer whose type has been widened to <code>string</code>; a JavaScript consumer with no types; two branches leaving one contract in different states; a changed default argument with a byte-identical signature.</p>
-      </div>
-      <div class="honest__col">
-        <h3><span class="tag tag--no">What it cannot do</span></h3>
-        <p>It cannot decide whether a body change altered behaviour. No static analysis here establishes that. Hairline says <em>likely</em> and <em>evidence that these changes interact</em> — never <em>proved incompatible</em>. And 100% on hand-built fixtures is a statement about the fixtures: precision on data it did not author is unmeasured.</p>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- ── start ────────────────────────────────────────────── -->
-<section id="start" class="rule">
-  <div class="wrap">
-    <div class="head reveal">
-      <p class="eyebrow">Quickstart</p>
-      <h2>One runtime dependency. Three commands.</h2>
-    </div>
-
-    <div class="reveal">
-      <div class="tabs" role="tablist" aria-label="Quickstart steps">
-        <button class="tab" role="tab" id="tab-install" aria-controls="panel-install" aria-selected="true">install</button>
-        <button class="tab" role="tab" id="tab-analyze" aria-controls="panel-analyze" aria-selected="false">analyze</button>
-        <button class="tab" role="tab" id="tab-ci" aria-controls="panel-ci" aria-selected="false">ci</button>
+  <!-- Results -->
+  <section class="results" id="results">
+    <div class="container">
+      <div class="section-head">
+        <h2>Measured against the check you already run.</h2>
+        <p>
+          Every test fixture is a real git repository in which both branches type-check on their own.
+          We run a merge-queue-style <code>tsc --noEmit</code> on the merged tree over the same fixtures.
+        </p>
       </div>
 
-      <div class="code" role="tabpanel" id="panel-install" aria-labelledby="tab-install">
-        <button class="copy" type="button" data-copy="git clone https://github.com/arnavnemade1/hairline &amp;&amp; cd hairline
+      <div class="bench">
+        <div class="bench__group">
+          <h3 class="bench__title">Conflicts caught <span>13 fixtures</span></h3>
+          <div class="bar-row">
+            <span class="bar-row__name">Hairline</span>
+            <div class="bar" role="img" aria-label="Hairline catches 13 of 13: 9 that a type check also catches, and 4 it cannot see">
+              <span class="bar__seg bar__seg--shared" style="--w:69.23%"></span>
+              <span class="bar__seg bar__seg--only" style="--w:30.77%"></span>
+            </div>
+            <span class="bar-row__value">13 / 13</span>
+          </div>
+          <div class="bar-row">
+            <span class="bar-row__name">Type check, merged tree</span>
+            <div class="bar" role="img" aria-label="A type check of the merged tree catches 9 of 13">
+              <span class="bar__seg bar__seg--base" style="--w:69.23%"></span>
+            </div>
+            <span class="bar-row__value">9 / 13</span>
+          </div>
+          <ul class="bench__legend">
+            <li><span class="key key--shared"></span>Caught by both</li>
+            <li><span class="key key--only"></span>Only Hairline: widened types, untyped callers, two branches rewriting one contract, a changed default</li>
+          </ul>
+        </div>
+
+        <div class="bench__group">
+          <h3 class="bench__title">False alarms <span>10 compatible pairs</span></h3>
+          <div class="bar-row">
+            <span class="bar-row__name">Hairline</span>
+            <div class="bar bar--empty" role="img" aria-label="Hairline raised no false alarms on 10 compatible branch pairs"></div>
+            <span class="bar-row__value">0 / 10</span>
+          </div>
+          <p class="bench__note">Negative controls apply the same kinds of change as the conflicts, made compatible&thinsp;&mdash;&thinsp;a signature change whose new caller already passes the new argument; an async change whose new caller already awaits.</p>
+        </div>
+      </div>
+
+      <aside class="caveat">
+        <p class="caveat__title">Read this before the numbers.</p>
+        <p>
+          We wrote these fixtures alongside the analyzers, so 100% on them is a statement about the fixtures, not
+          about your codebase. The first run on real history&thinsp;&mdash;&thinsp;six merged pull-request pairs in
+          <a href="https://github.com/colinhacks/zod">zod</a>&thinsp;&mdash;&thinsp;raised no false alarms. That&rsquo;s
+          encouraging, and far too small a sample to call a rate.
+        </p>
+        <a class="link-arrow" href="https://github.com/Arnavnemade1/Hairline/blob/main/docs/evaluation.md">How we measure <svg aria-hidden="true"><use href="#i-arrow" /></svg></a>
+      </aside>
+    </div>
+  </section>
+
+  <!-- FAQ -->
+  <section class="faq" id="faq">
+    <div class="container faq__grid">
+      <div class="section-head section-head--side">
+        <h2>Questions</h2>
+        <p>Can&rsquo;t find it here? The <a href="https://github.com/Arnavnemade1/Hairline#readme">docs</a> go deeper, including the <a href="https://github.com/Arnavnemade1/Hairline/blob/main/docs/threat-model.md">threat model</a>.</p>
+      </div>
+      <div class="faq__list">
+        <details>
+          <summary>Doesn&rsquo;t a merge queue already catch this?</summary>
+          <p>Often, yes&thinsp;&mdash;&thinsp;we measured it. A type check of the merged tree catches 9 of our 13 conflicts. Hairline flags those earlier, when the pull request opens instead of at the head of the queue, and names the branch that changed the contract and the branch that depends on it. The other 4 are invisible to a type check: a consumer typed as a plain <code>string</code>, an untyped JavaScript caller, two branches rewriting the same contract, and a changed default argument.</p>
+        </details>
+        <details>
+          <summary>Does it run my code or send it anywhere?</summary>
+          <p>No. Hairline parses and type-checks; nothing is executed or installed. It makes no network calls, and it reads your repository from git objects, so your working tree and <code>HEAD</code> are never touched&thinsp;&mdash;&thinsp;that&rsquo;s asserted in its own test suite.</p>
+        </details>
+        <details>
+          <summary>Which languages does it support?</summary>
+          <p>TypeScript and JavaScript today, through the TypeScript compiler. The engine talks to a language through a single adapter interface, so adding one means writing that adapter and its test fixtures&thinsp;&mdash;&thinsp;nothing else changes.</p>
+        </details>
+        <details>
+          <summary>Can it tell when behaviour changed but the types didn&rsquo;t?</summary>
+          <p>Not in general, and it doesn&rsquo;t pretend to. When a value changes under a new caller&thinsp;&mdash;&thinsp;a default argument, say&thinsp;&mdash;&thinsp;it reports a low-confidence risk and says plainly that it hasn&rsquo;t proven anything.</p>
+        </details>
+        <details>
+          <summary>How fast is it?</summary>
+          <p>Seconds per branch pair: about 5 to 20 on a 500-file repository, most of it spent in the type checker. Real merges touch around 1% of files, so Hairline only extracts full contracts for the files the branches changed and the files that import them.</p>
+        </details>
+        <details>
+          <summary>What happens when it can&rsquo;t finish?</summary>
+          <p>It says so. Exit code <code>3</code> means the analysis didn&rsquo;t complete, and it&rsquo;s deliberately different from <code>0</code>&thinsp;&mdash;&thinsp;a failure should never read as &ldquo;nothing found.&rdquo; Every report also states how much of the repository it actually saw.</p>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <!-- Get started -->
+  <section class="start" id="start">
+    <div class="container">
+      <div class="section-head">
+        <h2>Run it on the branches you&rsquo;re about to merge.</h2>
+        <p>Node 22.6+ and git 2.38+. Nothing else to configure.</p>
+      </div>
+
+      <div class="terminal" data-tabs>
+        <div class="terminal__tabs" role="tablist" aria-label="Get started">
+          <button role="tab" id="t-install" aria-controls="p-install" aria-selected="true" tabindex="0">Install</button>
+          <button role="tab" id="t-analyze" aria-controls="p-analyze" aria-selected="false" tabindex="-1">Analyze</button>
+          <button role="tab" id="t-ci" aria-controls="p-ci" aria-selected="false" tabindex="-1">GitHub Actions</button>
+        </div>
+
+        <div class="terminal__panel is-active" role="tabpanel" id="p-install" aria-labelledby="t-install" tabindex="0">
+          <button class="copy" type="button" data-copy="git clone https://github.com/Arnavnemade1/Hairline hairline
+cd hairline
 npm install
-npm test
-npm run build">Copy</button>
-<pre><span class="c-dim"># Node ≥ 22.6, git ≥ 2.38</span>
-<span class="c-accent">git</span> clone https://github.com/arnavnemade1/hairline &amp;&amp; <span class="c-accent">cd</span> hairline
-<span class="c-accent">npm</span> install      <span class="c-dim"># one runtime dependency: typescript</span>
-<span class="c-accent">npm</span> test
-<span class="c-accent">npm</span> run build    <span class="c-dim"># produces dist/, which bin/hairline.js runs</span></pre>
+npm run build"><svg aria-hidden="true"><use href="#i-copy" /></svg><span>Copy</span></button>
+<pre><span class="p">$</span> git clone https://github.com/Arnavnemade1/Hairline hairline
+<span class="p">$</span> cd hairline
+<span class="p">$</span> npm install      <span class="c"># one runtime dependency: typescript</span>
+<span class="p">$</span> npm run build</pre>
+        </div>
+
+        <div class="terminal__panel" role="tabpanel" id="p-analyze" aria-labelledby="t-analyze" tabindex="0">
+          <button class="copy" type="button" data-copy="node bin/hairline.js analyze --repo ../your-repo --base main --branches agent-a agent-b"><svg aria-hidden="true"><use href="#i-copy" /></svg><span>Copy</span></button>
+<pre><span class="c"># conflicts between branches that share a base</span>
+<span class="p">$</span> node bin/hairline.js analyze --repo ../your-repo \
+    --base main --branches agent-a agent-b
+
+<span class="c"># one finding in full, with the code from both branches</span>
+<span class="p">$</span> node bin/hairline.js explain 8a47418b --repo ../your-repo \
+    --base main --branches agent-a agent-b
+
+<span class="c"># machine-readable report</span>
+<span class="p">$</span> node bin/hairline.js analyze --repo ../your-repo \
+    --base main --branches agent-a agent-b --json</pre>
+        </div>
+
+        <div class="terminal__panel" role="tabpanel" id="p-ci" aria-labelledby="t-ci" tabindex="0">
+          <button class="copy" type="button" data-copy="name: hairline
+on: pull_request
+
+jobs:
+  semantic-conflicts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install Hairline
+        run: |
+          git clone --depth 1 https://github.com/Arnavnemade1/Hairline /tmp/hairline
+          npm ci --prefix /tmp/hairline
+          npm run build --prefix /tmp/hairline
+
+      - name: Check against a concurrent branch
+        run: >
+          node /tmp/hairline/bin/hairline.js analyze
+          --base origin/${{ github.base_ref }}
+          --branches ${{ github.event.pull_request.head.sha }} origin/agent-b"><svg aria-hidden="true"><use href="#i-copy" /></svg><span>Copy</span></button>
+<pre><span class="y">name:</span> hairline
+<span class="y">on:</span> pull_request
+
+<span class="y">jobs:</span>
+  <span class="y">semantic-conflicts:</span>
+    <span class="y">runs-on:</span> ubuntu-latest
+    <span class="y">steps:</span>
+      - <span class="y">uses:</span> actions/checkout@v4
+        <span class="y">with:</span>
+          <span class="y">fetch-depth:</span> 0            <span class="c"># the merge base needs history</span>
+
+      - <span class="y">uses:</span> actions/setup-node@v4
+        <span class="y">with:</span>
+          <span class="y">node-version:</span> 24
+
+      - <span class="y">name:</span> Install Hairline
+        <span class="y">run:</span> |
+          git clone --depth 1 https://github.com/Arnavnemade1/Hairline /tmp/hairline
+          npm ci --prefix /tmp/hairline
+          npm run build --prefix /tmp/hairline
+
+      - <span class="y">name:</span> Check against a concurrent branch
+        <span class="y">run:</span> &gt;
+          node /tmp/hairline/bin/hairline.js analyze
+          --base origin/${{ github.base_ref }}
+          --branches ${{ github.event.pull_request.head.sha }} origin/agent-b</pre>
+          <p class="terminal__note">
+            Replace <code>origin/agent-b</code> with any branch this pull request might meet&thinsp;&mdash;&thinsp;another agent&rsquo;s
+            open PR, say. A finding exits <code>1</code> and fails the check. By default that means high- and
+            medium-confidence findings; add <code>--min-confidence high</code> to block only on conflicts Hairline can
+            decide from the code alone.
+          </p>
+        </div>
       </div>
 
-      <div class="code" role="tabpanel" id="panel-analyze" aria-labelledby="tab-analyze" hidden>
-        <button class="copy" type="button" data-copy="node bin/hairline.js analyze --base main --branches agent-a agent-b">Copy</button>
-<pre><span class="c-dim"># report the conflicts between two concurrent branches</span>
-<span class="c-accent">node</span> bin/hairline.js analyze --base main --branches agent-a agent-b
+      <dl class="exits">
+        <div><dt><code>0</code></dt><dd>Nothing found</dd></div>
+        <div><dt><code>1</code></dt><dd>Conflicts reported</dd></div>
+        <div><dt><code>2</code></dt><dd>Invalid usage</dd></div>
+        <div><dt><code>3</code></dt><dd>Couldn&rsquo;t complete&thinsp;&mdash;&thinsp;never &ldquo;nothing found&rdquo;</dd></div>
+      </dl>
+    </div>
+  </section>
 
-<span class="c-dim"># one finding in full, with the source quoted at every evidence site</span>
-<span class="c-accent">node</span> bin/hairline.js explain 8a47418b --base main --branches agent-a agent-b
-
-<span class="c-dim"># machine-readable, and what each analyzer looks for</span>
-<span class="c-accent">node</span> bin/hairline.js analyze --base main --branches agent-a agent-b --json
-<span class="c-accent">node</span> bin/hairline.js analyzers</pre>
-      </div>
-
-      <div class="code" role="tabpanel" id="panel-ci" aria-labelledby="tab-ci" hidden>
-        <button class="copy" type="button" data-copy="- name: Hairline
-  run: node bin/hairline.js analyze --base ${{ github.base_ref }} --branches ${{ github.head_ref }} other-agent-branch --min-confidence medium">Copy</button>
-<pre><span class="c-dim"># the primary consumer is a CI step deciding whether to stop</span>
-<span class="c-accent">- name:</span> Hairline
-  <span class="c-accent">run:</span> node bin/hairline.js analyze
-          --base ${{ github.base_ref }}
-          --branches ${{ github.head_ref }} other-agent-branch
-          --min-confidence medium</pre>
-      </div>
-
-      <p class="exits__label">Exit codes — the primary consumer is a CI step deciding whether to stop</p>
-      <div class="exits">
-        <div class="exit"><code>0</code><p>analysis ran, nothing found at or above the threshold</p></div>
-        <div class="exit"><code>1</code><p>findings reported</p></div>
-        <div class="exit"><code>2</code><p>invalid usage</p></div>
-        <div class="exit"><code>3</code><p>analysis could not complete — distinct from 0 on purpose, because a failure must never read as "nothing found"</p></div>
+  <!-- Closing -->
+  <section class="closing">
+    <div class="container closing__inner">
+      <svg class="closing__mark" aria-hidden="true"><use href="#mark" /></svg>
+      <h2>Find the crack before main does.</h2>
+      <p>Point Hairline at two branches you&rsquo;re about to merge. The worst case is that it finds nothing.</p>
+      <div class="closing__actions">
+        <a class="btn btn--primary btn--lg" href="#start">Get started</a>
+        <a class="btn btn--ghost-dark btn--lg" href="https://github.com/Arnavnemade1/Hairline#readme">Read the docs</a>
       </div>
     </div>
-  </div>
-</section>
-
-<!-- ── cta ──────────────────────────────────────────────── -->
-<section>
-  <div class="wrap">
-    <div class="cta reveal">
-      <h2>Point it at two branches you are about to merge.</h2>
-      <p>It never merges, never rewrites, never executes repository code, and never talks to the network. The worst case is that it finds nothing.</p>
-      <div class="hero__cta">
-        <a class="btn btn--primary" href="https://github.com/arnavnemade1/hairline">Clone the repository</a>
-        <a class="btn btn--ghost" href="https://github.com/arnavnemade1/hairline/blob/main/docs/architecture.md">Read the architecture &rarr;</a>
-      </div>
-    </div>
-  </div>
-</section>
+  </section>
 
 </main>
 
-<footer class="foot">
-  <div class="wrap">
-    <div class="foot__grid">
-      <div>
-        <a class="brand" href="#top" style="margin-bottom:12px">
-          <svg class="brand__mark" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#c9f24e"/><path d="M9 8v16M23 8v16M9 16h14" stroke="#06070a" stroke-width="2.4" stroke-linecap="round"/></svg>
-          <span>hairline</span>
-        </a>
-        <p style="font-size:0.86rem;color:var(--faint);max-width:30ch">A semantic integration engine for concurrent branches.</p>
-      </div>
-      <div>
-        <h4>Docs</h4>
-        <ul>
-          <li><a href="https://github.com/arnavnemade1/hairline/blob/main/docs/architecture.md">Architecture</a></li>
-          <li><a href="https://github.com/arnavnemade1/hairline/blob/main/docs/research.md">Research</a></li>
-          <li><a href="https://github.com/arnavnemade1/hairline/blob/main/docs/decisions.md">Decisions</a></li>
-        </ul>
-      </div>
-      <div>
-        <h4>Evidence</h4>
-        <ul>
-          <li><a href="https://github.com/arnavnemade1/hairline/blob/main/docs/evaluation.md">Evaluation</a></li>
-          <li><a href="https://github.com/arnavnemade1/hairline/blob/main/docs/threat-model.md">Threat model</a></li>
-          <li><a href="https://github.com/arnavnemade1/hairline/blob/main/progress.md">Progress</a></li>
-        </ul>
-      </div>
-      <div>
-        <h4>Project</h4>
-        <ul>
-          <li><a href="https://github.com/arnavnemade1/hairline">GitHub</a></li>
-          <li><a href="https://github.com/arnavnemade1/hairline/blob/main/README.md">README</a></li>
-          <li><a href="https://mergiraf.org/">Mergiraf (textual merges)</a></li>
-        </ul>
-      </div>
+<footer class="footer">
+  <div class="container footer__grid">
+    <div class="footer__brand">
+      <a class="brand" href="#top" aria-label="Hairline home">
+        <svg class="brand__mark" aria-hidden="true"><use href="#mark" /></svg>
+        <span class="brand__word">Hairline</span>
+      </a>
+      <p>Semantic conflict detection for concurrent branches.</p>
     </div>
-    <div class="foot__base">
-      <span>Apache-2.0</span>
-      <span>Findings are evidence, not verdicts.</span>
-    </div>
+    <nav class="footer__col" aria-label="Product">
+      <h2>Product</h2>
+      <a href="#catches">What it catches</a>
+      <a href="#how">How it works</a>
+      <a href="#results">Results</a>
+      <a href="#start">Get started</a>
+    </nav>
+    <nav class="footer__col" aria-label="Documentation">
+      <h2>Documentation</h2>
+      <a href="https://github.com/Arnavnemade1/Hairline/blob/main/docs/architecture.md">Architecture</a>
+      <a href="https://github.com/Arnavnemade1/Hairline/blob/main/docs/evaluation.md">Evaluation</a>
+      <a href="https://github.com/Arnavnemade1/Hairline/blob/main/docs/research.md">Research</a>
+      <a href="https://github.com/Arnavnemade1/Hairline/blob/main/docs/decisions.md">Design decisions</a>
+      <a href="https://github.com/Arnavnemade1/Hairline/blob/main/docs/threat-model.md">Threat model</a>
+    </nav>
+    <nav class="footer__col" aria-label="Project">
+      <h2>Project</h2>
+      <a href="https://github.com/Arnavnemade1/Hairline">GitHub</a>
+      <a href="https://github.com/Arnavnemade1/Hairline/issues">Issues</a>
+      <a href="https://github.com/Arnavnemade1/Hairline/blob/main/progress.md">Roadmap</a>
+    </nav>
+  </div>
+  <div class="container footer__base">
+    <p>&copy; <span data-year>2026</span> Hairline. Open source.</p>
+    <p>Git merges lines. Hairline checks contracts.</p>
   </div>
 </footer>
-
-<script src="./main.js" defer></script>
 </body>
 </html>
